@@ -1,0 +1,11 @@
+/ohyeah
+/*.db
+/*.db-shm
+/*.db-wal
+/.idea/
+/.vscode/
+/tmp/
+/config.local.yaml
+.DS_Store
+/node_modules/
+/dist/
