@@ -1,0 +1,11 @@
+export type Stats = { sources: number; objects: number; memoryUnits: number; relations: number; pendingOutbox: number; failedOutbox: number }
+export type Doctor = { sqliteCount: number; meilisearchCount: number; indexExists: boolean; consistent: boolean }
+export type Status = { backend: string; stats: Stats; statePath: string; index: string; doctor: Doctor; doctorError?: string }
+export type Project = { id: string; workspace: string; enabled: boolean; state: string }
+export type Source = { id: string; projectId: string; typeId: string; mountName: string; path: string; enabled: boolean; state: string; managedBy: string; typeRevision: number; mountRevision: number; options?: Record<string, unknown>; cursor?: unknown; updatedAt: string }
+export type SyncRun = { id: number; sourceId: string; status: string; scanned: number; changed: number; deleted: number; error?: string; startedAt: string; finishedAt?: string }
+export type MemoryUnit = { id: string; title: string; content: string; kind: string; status: string; occurredAt: string; sourceId: string; sourceType: string; projectId?: string; typeId?: string; mountId?: string; path?: string; heading?: string; threadId?: string; turnId?: string; entities?: string[]; repos?: string[]; requirementIds?: string[] }
+export type SearchHit = { unit: MemoryUnit; reference?: Record<string,string>; score?: number; superseded: boolean; correctedBy?: string[] }
+export type MemoryRecord = { unit: MemoryUnit; reference?: Record<string,string> }
+export type RegistryAction = { entity: string; type: string; id: string; reason: string; resetCursor: boolean }
+export type ConfigData = { path: string; raw: string; hash: string; projects: Record<string, unknown>; actions: RegistryAction[] }

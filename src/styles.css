@@ -1,0 +1,30 @@
+@import "tailwindcss";
+@theme { --font-sans: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+@layer base { body { @apply m-0 font-sans antialiased; } button, input { @apply outline-none; } }
+@layer components {
+  .nav-item { @apply flex w-full items-center gap-3 rounded-md px-3 py-2.5 text-sm text-slate-500 transition-colors hover:bg-slate-50 hover:text-slate-900; }
+  .nav-active { @apply bg-slate-100 font-medium text-slate-900; }
+  .icon-button { @apply grid size-9 place-items-center rounded-md text-slate-500 transition-colors hover:bg-white hover:text-slate-900; }
+  .search-input { @apply h-12 w-full rounded-lg border border-slate-200 bg-white pl-11 pr-4 text-sm shadow-sm transition focus:border-slate-400 focus:ring-2 focus:ring-slate-100; }
+	.button { @apply inline-flex h-10 shrink-0 items-center justify-center gap-2 rounded-md px-4 text-sm font-medium transition disabled:cursor-not-allowed disabled:opacity-50; }
+	.button-primary { @apply bg-slate-900 text-white hover:bg-slate-700; }
+	.button-secondary { @apply border border-slate-200 bg-white text-slate-700 hover:border-slate-300 hover:bg-slate-50; }
+	.button-danger { @apply bg-rose-600 text-white hover:bg-rose-500; }
+  .metric { @apply border border-slate-200 bg-white p-5; }
+	.badge { @apply inline-flex shrink-0 rounded px-2 py-0.5 text-[11px] font-medium; }
+	.badge-neutral { @apply bg-slate-100 text-slate-500; }
+	.badge-success { @apply bg-emerald-50 text-emerald-700; }
+	.badge-warning { @apply bg-amber-50 text-amber-700; }
+	.badge-danger { @apply bg-rose-50 text-rose-700; }
+	.badge-info { @apply bg-sky-50 text-sky-700; }
+  .result-row { @apply flex w-full items-center gap-5 px-2 py-5 text-left transition hover:bg-white; }
+	.select { @apply h-10 w-full rounded-md border border-slate-200 bg-white px-3 text-sm text-slate-700 focus:border-slate-400 focus:ring-2 focus:ring-slate-100; }
+	.text-input { @apply h-10 w-full rounded-md border border-slate-200 bg-white px-3 text-sm text-slate-700 focus:border-slate-400 focus:ring-2 focus:ring-slate-100; }
+	.data-list { @apply divide-y divide-slate-200 border-y border-slate-200; }
+	.data-row { @apply flex items-center gap-4 py-3; }
+	.source-row { @apply flex items-center gap-4 py-4; }
+	.notice { @apply flex items-center gap-2 border px-4 py-3 text-sm; }
+	.notice-success { @apply border-emerald-200 bg-emerald-50 text-emerald-800; }
+	.notice-error { @apply border-rose-200 bg-rose-50 text-rose-800; }
+	.config-editor { @apply min-h-[600px] w-full resize-y rounded-md border border-slate-200 bg-[#111827] p-5 font-mono text-[13px] leading-6 text-slate-200 shadow-inner focus:border-slate-400; tab-size: 2; }
+}

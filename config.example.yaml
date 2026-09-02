@@ -1,0 +1,36 @@
+log_level: info
+
+server:
+  address: 127.0.0.1:8787
+
+meilisearch:
+  url: http://127.0.0.1:7700
+  api_key: ""
+  index: ohyeah_memory_v1
+  batch_size: 100
+
+sync:
+  reconcile_interval: 15m
+  debounce: 2s
+  collector_timeout: 5m
+  max_file_size: 268435456
+
+projects:
+  example:
+    enabled: true
+    workspace: /absolute/path/to/workspace
+    types:
+      documents:
+        enabled: true
+        collector:
+          command: /absolute/path/to/example-collector
+          args: [collect]
+          revision: 1
+          timeout: 5m
+        mounts:
+          work-memory:
+            enabled: true
+            root: /absolute/path/to/workspace/docs
+            revision: 1
+            options:
+              scope: recent
