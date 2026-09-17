@@ -403,9 +403,11 @@ func newSearchCommand(opts *options) *cobra.Command {
 	var kinds []string
 	var limit int
 	command := &cobra.Command{
-		Use:   "search <query>",
-		Short: "Search prior work memory",
-		Args:  cobra.ExactArgs(1),
+		Use:   "search \"<keyword1> <keyword2> ...\"",
+		Short: "Search prior work memory with one or more keywords",
+		Long: "Search prior work memory with one query string. Combine 2-8 relevant keywords in the quoted query when possible; " +
+			"Meilisearch considers at most the first 10 query words. This is relevance search, not a Boolean AND/OR expression.",
+		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if strings.TrimSpace(projectID) == "" {
 				return errors.New("search requires --project")

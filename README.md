@@ -130,10 +130,19 @@ projects:
 ```bash
 ./ohyeah sync --dry-run
 ./ohyeah sync
-./ohyeah search "OrderService 为什么这么改" --project example-project --json
+./ohyeah search "OrderService 路由修改 最终结论" --project example-project --json
 ./ohyeah get <memory-id> --json
 ./ohyeah status --json
 ```
+
+`search` 只接收一个 `<query>` 参数，但这个参数可以、也通常应该包含多个相关关键词。请用引号把整组关键词作为一个参数传入：
+
+```bash
+./ohyeah search "缓存 失效 用户配置" --project example-project --json
+./ohyeah search "事故 根因 修复 验证" --project example-project --kind conclusion,verification --json
+```
+
+建议一次提供 2～8 个有区分度的关键词；Meilisearch 最多处理查询中的前 10 个词。搜索会优先返回同时匹配更多关键词的记录，结果不足时再按相关度放宽，因此它不是严格的布尔 `AND/OR/NOT` 查询。若要缩小范围，请组合使用 `--project`、`--type`、`--mount` 和 `--kind`。
 
 `sync --dry-run` 会实际执行 collector，并报告预计的文档、memory unit、新增或更新以及删除数量，但不会修改 SQLite、游标、outbox 或 Meilisearch。
 

@@ -5,6 +5,6 @@ description: 检索本地工作记录中的历史结论、纠错和未完成事�
 
 # Ohyeah
 
-调用前先阅读当前项目及上级 `AGENTS.md`；只有项目明确启用 ohyeah 时才使用，否则跳过。先运行 `ohyeah -h`。搜索必须指定 `--project <项目>`，必要时再加 `--type <类型>` 或 `--mount <挂载点>`，例如 `ohyeah search <关键词> --project example-project --json`。用 `ohyeah get <id> --json` 查看原文。
+先读当前项目及上级 `AGENTS.md`；仅在项目启用 ohyeah 时使用。先运行 `ohyeah -h`。
 
-结果仅作历史依据：以较新的纠错和结论为准，时效性事实须复核，并标注来源。
+搜索必须指定 `--project`，通常在一个查询字符串中组合 2～8 个关键词，可加 `--type` 或 `--mount`；用 `ohyeah get <id> --json` 查看原文。结果仅作历史依据，时效性事实须复核并标注来源。
