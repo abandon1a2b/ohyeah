@@ -11,7 +11,7 @@ export const api = {
   status: () => request<Status>('/status'),
   projects: () => request<Project[]>('/projects'),
   sources: () => request<Source[]>('/sources'),
-  runs: (limit = 50) => request<SyncRun[]>(`/sync/runs?limit=${limit}`),
+  runs: (limit = 200) => request<SyncRun[]>(`/sync/runs?limit=${limit}`),
   sync: (sourceId?: string) => request<SyncRun | SyncRun[]>('/sync', { method: 'POST', body: JSON.stringify({ sourceId }) }),
   search: (params: URLSearchParams) => request<SearchHit[]>(`/search?${params}`),
   memory: (id: string) => request<MemoryRecord>(`/memories/${encodeURIComponent(id)}`),

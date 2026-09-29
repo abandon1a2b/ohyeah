@@ -84,6 +84,8 @@ make build
 
 已提交的 `internal/web/dist` 允许直接执行 `go build -o ohyeah .`；发布构建应使用 `make build`，确保前端源码与嵌入资源一致。
 
+Web UI 使用 shadcn/ui 的 Nova 风格组件和 `dashboard-01` 模板布局。组件源码位于 `src/components/ui`，主题变量在 `src/styles.css`，通过 `npx shadcn@latest add <component>` 按需添加组件。修改页面后运行 `make build`，让 `./ohyeah serve` 使用最新嵌入式资源。
+
 初始化本地状态库和 Meilisearch 索引：
 
 ```bash
