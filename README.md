@@ -175,6 +175,8 @@ projects:
 
 默认访问地址是 [http://127.0.0.1:8787](http://127.0.0.1:8787)，可以通过 `server.address` 修改。Web UI 提供状态总览、记忆搜索与完整详情、数据来源与手动同步、结构化配置和高级 YAML 编辑、配置校验/计划/保存，以及索引诊断和重建。
 
+前端开发时，先启动后端，再在另一个终端运行 `npm run dev`。Vite 固定监听 `http://localhost:5173`，并将 `/api` 请求代理到 `http://127.0.0.1:8787`。如果修改后端监听端口，也要同步修改 `vite.config.ts` 中的代理地址。
+
 collector 默认只按计划运行；设置 `watch=true` 后，还可以监听文件系统变化，并通过 `watch_extensions=md,json` 限制扩展名。每个 collector 都必须声明一次完成运行是完整快照（snapshot）还是增量变更（delta）。
 
 collector 有全局超时 `sync.collector_timeout`，数据类型可以通过 `collector.timeout` 覆盖。各 mount 独立同步：某个 mount 失败会被报告，但不会阻止后续 mount 运行并投递成功结果。
