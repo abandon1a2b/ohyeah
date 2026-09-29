@@ -161,6 +161,8 @@ projects:
 ./ohyeah serve
 ```
 
+请在项目目录使用 `./ohyeah serve`。直接运行 `ohyeah serve` 可能调用 PATH 中的旧安装版本；如果启动日志只有 `ohyeah synchronization started`，该版本不会启动 Web UI。先运行 `make build` 更新项目内的二进制，再用 `./ohyeah serve` 启动。
+
 `serve` 是完整的本地服务入口。一个命令会同时启动：
 
 - Fiber HTTP API 与嵌入式 Web UI
