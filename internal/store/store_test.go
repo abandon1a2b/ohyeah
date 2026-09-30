@@ -184,3 +184,70 @@ func TestApplyConfigStateIsAtomic(t *testing.T) {
 		t.Fatalf("partial config state was committed: %#v", projects)
 	}
 }
+
+func TestSyncRunPreservesFinishTime(t *testing.T) {
+	state, err := Open(filepath.Join(t.TempDir(), "state.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer state.Close()
+	ctx := context.Background()
+	id, err := state.StartSyncRun(ctx, "project/type/mount")
+	if err != nil {
+		t.Fatal(err)
+	}
+	finished := time.Date(2026, 9, 30, 1, 2, 3, 456000000, time.UTC)
+	if err := state.FinishSyncRun(ctx, model.SyncRun{ID: id, Status: "succeeded", Scanned: 3, FinishedAt: &finished}); err != nil {
+		t.Fatal(err)
+	}
+	runs, err := state.ListSyncRuns(ctx, "project/type/mount", 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(runs) != 1 || runs[0].FinishedAt == nil || !runs[0].FinishedAt.Equal(finished) || runs[0].Scanned != 3 {
+		t.Fatalf("unexpected run: %#v", runs)
+	}
+}
+
+func TestMigrateVersionThreeAddsSyncRunIndex(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "state.db")
+	state, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := state.db.Exec(`DROP INDEX idx_sync_runs_source_id`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := state.db.Exec(`PRAGMA user_version=3`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := state.db.Exec(`UPDATE schema_versions SET version=3 WHERE component='store'`); err != nil {
+		t.Fatal(err)
+	}
+	if err := state.Close(); err != nil {
+		t.Fatal(err)
+	}
+	state, err = Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer state.Close()
+	var version int
+	if err := state.db.QueryRow(`PRAGMA user_version`).Scan(&version); err != nil {
+		t.Fatal(err)
+	}
+	var indexName string
+	if err := state.db.QueryRow(`SELECT name FROM sqlite_master WHERE type='index' AND name='idx_sync_runs_source_id'`).Scan(&indexName); err != nil {
+		t.Fatal(err)
+	}
+	if version != 4 || indexName != "idx_sync_runs_source_id" {
+		t.Fatalf("schema version=%d index=%q", version, indexName)
+	}
+	var recordedVersion int
+	if err := state.db.QueryRow(`SELECT version FROM schema_versions WHERE component='store'`).Scan(&recordedVersion); err != nil {
+		t.Fatal(err)
+	}
+	if recordedVersion != 4 {
+		t.Fatalf("recorded schema version=%d", recordedVersion)
+	}
+}

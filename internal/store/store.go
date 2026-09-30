@@ -75,11 +75,28 @@ func (s *Store) migrate(ctx context.Context) error {
 	if err := s.db.QueryRowContext(ctx, `PRAGMA user_version`).Scan(&version); err != nil {
 		return err
 	}
-	if version > 3 {
+	if version > 4 {
 		return fmt.Errorf("state database schema version %d is newer than this ohyeah binary", version)
 	}
-	if version == 3 {
+	if version == 4 {
 		return nil
+	}
+	if version == 3 {
+		tx, err := s.db.BeginTx(ctx, nil)
+		if err != nil {
+			return err
+		}
+		defer tx.Rollback()
+		if _, err := tx.ExecContext(ctx, `CREATE INDEX IF NOT EXISTS idx_sync_runs_source_id ON sync_runs(source_id, id DESC)`); err != nil {
+			return err
+		}
+		if _, err := tx.ExecContext(ctx, `UPDATE schema_versions SET version=4, updated_at=CURRENT_TIMESTAMP WHERE component='store'`); err != nil {
+			return err
+		}
+		if _, err := tx.ExecContext(ctx, `PRAGMA user_version=4`); err != nil {
+			return err
+		}
+		return tx.Commit()
 	}
 	const schema = `
 CREATE TABLE IF NOT EXISTS projects (
@@ -183,6 +200,7 @@ CREATE TABLE IF NOT EXISTS sync_runs (
     started_at TEXT NOT NULL,
     finished_at TEXT
 );
+CREATE INDEX IF NOT EXISTS idx_sync_runs_source_id ON sync_runs(source_id, id DESC);
 CREATE TABLE IF NOT EXISTS index_outbox (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     operation TEXT NOT NULL,
@@ -200,7 +218,7 @@ CREATE TABLE IF NOT EXISTS schema_versions (
     updated_at TEXT NOT NULL
 );
 INSERT INTO schema_versions(component, version, updated_at)
-VALUES ('store', 3, CURRENT_TIMESTAMP)
+VALUES ('store', 4, CURRENT_TIMESTAMP)
 ON CONFLICT(component) DO UPDATE SET version=excluded.version, updated_at=excluded.updated_at;
 `
 	if _, err := s.db.ExecContext(ctx, schema); err != nil {
@@ -221,7 +239,7 @@ ON CONFLICT(component) DO UPDATE SET version=excluded.version, updated_at=exclud
 	if err := s.ensureColumn(ctx, "memory_units", "mount_id", `TEXT NOT NULL DEFAULT ''`); err != nil {
 		return err
 	}
-	_, err := s.db.ExecContext(ctx, `PRAGMA user_version=3`)
+	_, err := s.db.ExecContext(ctx, `PRAGMA user_version=4`)
 	return err
 }
 
@@ -882,8 +900,11 @@ func (s *Store) StartSyncRun(ctx context.Context, sourceID string) (int64, error
 }
 
 func (s *Store) FinishSyncRun(ctx context.Context, run model.SyncRun) error {
+	if run.FinishedAt == nil {
+		return errors.New("sync run finish time is required")
+	}
 	_, err := s.db.ExecContext(ctx, `UPDATE sync_runs SET status=?, scanned=?, changed=?, deleted=?, error=?, finished_at=? WHERE id=?`,
-		run.Status, run.Scanned, run.Changed, run.Deleted, run.Error, formatTime(time.Now().UTC()), run.ID)
+		run.Status, run.Scanned, run.Changed, run.Deleted, run.Error, formatTime(*run.FinishedAt), run.ID)
 	return err
 }
 

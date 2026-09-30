@@ -1,6 +1,7 @@
 import { FolderSync, RefreshCw } from "lucide-react";
 import { Badge, Empty, Spinner } from "../components";
 import { Button } from "@/components/ui/button";
+import { finishLabel } from "@/sync-run-time";
 import {
   Table,
   TableBody,
@@ -83,6 +84,12 @@ export function SourcesPage({
                       {busy === source.id ? <Spinner label="同步中" /> : "同步"}
                     </Button>
                   </div>
+                  {run && (
+                    <div className="flex flex-col gap-1 text-xs text-muted-foreground">
+                      <span>开始 {new Date(run.startedAt).toLocaleString()}</span>
+                      <span>结束 {finishLabel(run)}</span>
+                    </div>
+                  )}
                 </div>
               );
             })}
@@ -130,7 +137,9 @@ export function SourcesPage({
                               {run.status} · 变更 {run.changed}
                             </span>
                             <div className="text-xs">
-                              {new Date(run.startedAt).toLocaleString()}
+                              开始 {new Date(run.startedAt).toLocaleString()}
+                              <span className="mx-1">·</span>
+                              结束 {finishLabel(run)}
                             </div>
                           </>
                         ) : (

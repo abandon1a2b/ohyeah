@@ -19,6 +19,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { durationLabel, finishLabel } from "@/sync-run-time";
 import type { SyncRun } from "@/types";
 
 export function DataTable({ runs }: { runs: SyncRun[] }) {
@@ -106,7 +107,9 @@ export function DataTable({ runs }: { runs: SyncRun[] }) {
                   >
                     {run.status}
                   </Badge>
-                  <span>{new Date(run.startedAt).toLocaleString()}</span>
+                  <span>开始 {new Date(run.startedAt).toLocaleString()}</span>
+                  <span>结束 {finishLabel(run)}</span>
+                  <span>耗时 {durationLabel(run)}</span>
                   <span>扫描 {run.scanned}</span>
                   <span>变更 {run.changed}</span>
                   <span>删除 {run.deleted}</span>
@@ -120,6 +123,8 @@ export function DataTable({ runs }: { runs: SyncRun[] }) {
                 <TableRow>
                   <TableHead>数据来源</TableHead>
                   <TableHead>开始时间</TableHead>
+                  <TableHead>结束时间</TableHead>
+                  <TableHead className="text-right">耗时</TableHead>
                   <TableHead className="text-right">扫描</TableHead>
                   <TableHead className="text-right">变更</TableHead>
                   <TableHead className="text-right">删除</TableHead>
@@ -134,6 +139,12 @@ export function DataTable({ runs }: { runs: SyncRun[] }) {
                     </TableCell>
                     <TableCell className="whitespace-nowrap text-muted-foreground">
                       {new Date(run.startedAt).toLocaleString()}
+                    </TableCell>
+                    <TableCell className="whitespace-nowrap text-muted-foreground">
+                      {finishLabel(run)}
+                    </TableCell>
+                    <TableCell className="text-right whitespace-nowrap tabular-nums">
+                      {durationLabel(run)}
                     </TableCell>
                     <TableCell className="text-right tabular-nums">
                       {run.scanned}
