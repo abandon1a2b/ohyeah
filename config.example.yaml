@@ -8,6 +8,14 @@ meilisearch:
   api_key: ""
   index: ohyeah_memory_v1
   batch_size: 100
+  embedding:
+    enabled: false
+    name: qwen
+    url: http://127.0.0.1:11434/api/embed
+    model: qwen3-embedding:0.6b
+    dimensions: 1024
+    document_template_max_bytes: 12000
+    semantic_ratio: 0.5
 
 sync:
   reconcile_interval: 15m

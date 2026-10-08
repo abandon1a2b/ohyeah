@@ -6,6 +6,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
+	"reflect"
 	"slices"
 	"strings"
 	"time"
@@ -16,8 +18,9 @@ import (
 )
 
 type Meilisearch struct {
-	client meilisearch.ServiceManager
-	index  string
+	client    meilisearch.ServiceManager
+	index     string
+	embedding config.EmbeddingConfig
 }
 
 func NewMeilisearch(cfg config.MeilisearchConfig) *Meilisearch {
@@ -25,7 +28,7 @@ func NewMeilisearch(cfg config.MeilisearchConfig) *Meilisearch {
 	if cfg.APIKey != "" {
 		options = append(options, meilisearch.WithAPIKey(cfg.APIKey))
 	}
-	return &Meilisearch{client: meilisearch.New(cfg.URL, options...), index: cfg.Index}
+	return &Meilisearch{client: meilisearch.New(cfg.URL, options...), index: cfg.Index, embedding: cfg.Embedding}
 }
 
 func (m *Meilisearch) Ensure(ctx context.Context) error {
@@ -84,6 +87,16 @@ func (m *Meilisearch) Ensure(ctx context.Context) error {
 			return fmt.Errorf("update %s: %w", setting.name, err)
 		}
 	}
+	// The authoritative search index must never call an embedding service on writes.
+	if len(current.Embedders) > 0 {
+		task, err := index.ResetEmbeddersWithContext(ctx)
+		if err != nil {
+			return err
+		}
+		if err := m.wait(task.TaskUID); err != nil {
+			return err
+		}
+	}
 	return nil
 }
 
@@ -129,6 +142,23 @@ func (m *Meilisearch) Delete(ctx context.Context, ids []string) error {
 }
 
 func (m *Meilisearch) Search(ctx context.Context, query model.SearchQuery) ([]model.SearchHit, error) {
+	if _, err := m.searchMode(query.Mode); err != nil {
+		return nil, err
+	}
+	hits, err := m.search(ctx, query)
+	if err != nil && (query.Mode == "hybrid" || query.Mode == "semantic") && ctx.Err() == nil {
+		slog.Warn("optional retrieval failed; using keyword search", "error", err)
+		query.Mode = "keyword"
+		return m.search(ctx, query)
+	}
+	return hits, err
+}
+
+func (m *Meilisearch) search(ctx context.Context, query model.SearchQuery) ([]model.SearchHit, error) {
+	hybrid, err := m.searchMode(query.Mode)
+	if err != nil {
+		return nil, err
+	}
 	limit := query.Limit
 	if limit <= 0 {
 		limit = 20
@@ -154,6 +184,7 @@ func (m *Meilisearch) Search(ctx context.Context, query model.SearchQuery) ([]mo
 		filters = append(filters, `kind IN [`+strings.Join(values, ",")+`]`)
 	}
 	request := &meilisearch.SearchRequest{
+		Hybrid:               hybrid,
 		Limit:                int64(limit * 4),
 		AttributesToRetrieve: []string{"id", "objectId", "projectId", "typeId", "mountId", "workspaceId", "sourceId", "sourceType", "kind", "title", "threadId", "turnId", "path", "heading", "occurredAt", "contentHash", "status", "requirementIds", "repos", "entities", "metadata"},
 		AttributesToCrop:     []string{"content"},
@@ -164,7 +195,26 @@ func (m *Meilisearch) Search(ctx context.Context, query model.SearchQuery) ([]mo
 	if len(filters) > 0 {
 		request.Filter = strings.Join(filters, " AND ")
 	}
-	response, err := m.client.Index(m.index).Search(query.Query, request)
+	searchIndex := m.index
+	if hybrid != nil {
+		optionalCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
+		vectors, vectorErr := m.embed(optionalCtx, []string{query.Query})
+		if vectorErr == nil {
+			request.Vector = vectors[0]
+			searchIndex = m.vectorIndex()
+		} else {
+			slog.Warn("optional semantic search unavailable; using keyword search", "error", vectorErr)
+			request.Hybrid = nil
+		}
+		cancel()
+	}
+	response, err := m.client.Index(searchIndex).SearchWithContext(ctx, query.Query, request)
+	if searchIndex != m.index && err != nil {
+		slog.Warn("optional vector index unavailable; using keyword search", "error", err)
+		request.Hybrid, request.Vector = nil, nil
+		searchIndex = m.index
+		response, err = m.client.Index(m.index).SearchWithContext(ctx, query.Query, request)
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -178,6 +228,23 @@ func (m *Meilisearch) Search(ctx context.Context, query model.SearchQuery) ([]mo
 		if err := json.Unmarshal(encoded, &unit); err != nil {
 			return nil, err
 		}
+		if searchIndex != m.index {
+			var live model.MemoryUnit
+			if err := m.client.Index(m.index).GetDocumentWithContext(ctx, unit.ID, nil, &live); err != nil {
+				if isNotFound(err) {
+					continue
+				}
+				return nil, err
+			}
+			if live.ContentHash != unit.ContentHash {
+				continue
+			}
+			// Metadata changes do not necessarily change the content hash.
+			live.Content = ""
+			if !reflect.DeepEqual(live, unit) {
+				continue
+			}
+		}
 		var ranked struct {
 			Score     float64 `json:"_rankingScore"`
 			Formatted struct {
@@ -188,7 +255,32 @@ func (m *Meilisearch) Search(ctx context.Context, query model.SearchQuery) ([]mo
 		unit.Content = ranked.Formatted.Content
 		hits = append(hits, model.SearchHit{Unit: unit, Score: ranked.Score})
 	}
+	if searchIndex != m.index && len(hits) == 0 {
+		query.Mode = "keyword"
+		return m.Search(ctx, query)
+	}
 	return hits, nil
+}
+
+func (m *Meilisearch) searchMode(mode string) (*meilisearch.SearchRequestHybrid, error) {
+	if mode == "" {
+		mode = "keyword"
+	}
+	switch mode {
+	case "keyword":
+		return nil, nil
+	case "hybrid", "semantic":
+		if !m.embedding.Enabled {
+			return nil, nil
+		}
+		ratio := m.embedding.SemanticRatio
+		if mode == "semantic" {
+			ratio = 1
+		}
+		return &meilisearch.SearchRequestHybrid{Embedder: m.embedding.Name, SemanticRatio: ratio}, nil
+	default:
+		return nil, fmt.Errorf("unknown search mode %q; use keyword, hybrid or semantic", mode)
+	}
 }
 
 func (m *Meilisearch) Count(ctx context.Context) (int64, bool, error) {

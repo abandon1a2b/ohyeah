@@ -308,6 +308,35 @@ func (s *Service) RebuildIndex(ctx context.Context) (int64, error) {
 	return indexed, nil
 }
 
+func (s *Service) RebuildVectorIndex(ctx context.Context) (int64, error) {
+	backend, ok := s.backend.(interface {
+		ResetVectors(context.Context) error
+		UpsertVectors(context.Context, [][]byte) error
+	})
+	if !ok {
+		return 0, errors.New("backend does not support vectors")
+	}
+	if err := backend.ResetVectors(ctx); err != nil {
+		return 0, err
+	}
+	var afterID string
+	var indexed int64
+	for {
+		payloads, nextID, err := s.store.MemoryPayloadBatch(ctx, afterID, 16)
+		if err != nil {
+			return indexed, err
+		}
+		if len(payloads) == 0 {
+			return indexed, nil
+		}
+		if err := backend.UpsertVectors(ctx, payloads); err != nil {
+			return indexed, err
+		}
+		indexed += int64(len(payloads))
+		afterID = nextID
+	}
+}
+
 func (s *Service) Doctor(ctx context.Context) (DoctorResult, error) {
 	sqliteCount, err := s.store.MemoryCount(ctx)
 	if err != nil {

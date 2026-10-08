@@ -198,6 +198,26 @@ OHYEAH_STATE_PATH
 
 可用配置项见 [config.example.yaml](config.example.yaml)。没有配置文件时，程序会使用适合本地运行的安全默认值。
 
+### Qwen 向量与混合检索
+
+启动本机 Ollama 并下载 `qwen3-embedding:0.6b` 后，在配置中启用
+`meilisearch.embedding.enabled: true`，其他参数参考 `config.example.yaml`。
+向量能力是可选增强。默认搜索始终为全文检索，初始化、同步、主索引重建
+和诊断均不依赖 Ollama。`ohyeah index vectors` 单独从 SQLite 构建
+`<主索引名>_vectors_<配置哈希>`；更换模型、维度或输入长度后不会误用旧向量。
+应用先调用 Ollama，再将向量以 userProvided 方式提交，
+Meilisearch 索引任务不调用模型服务。向量构建失败不影响主全文索引或 outbox。
+
+CLI 可通过 `--mode hybrid|semantic` 主动使用向量；HTTP 搜索接口接受同名
+`mode` 参数。向量未启用、索引缺失或模型不可用时自动回退全文；查询模型的
+等待上限为 2 秒，普通全文查询完全不调用模型。更新或删除后的旧向量结果会
+通过主索引的记录、contentHash 和元数据检查过滤，向量数据需再次执行 `index vectors`
+更新；当前尚未自动增量维护向量。
+
+修改 embedding 配置后需要重启 ohyeah 服务。向量化输入为标题与正文，
+最长 12000 字节，超过时裁剪；当前 Ollama 上下文为 4096 token，长文档尚未
+增加语义切块。可选向量构建失败会明确报错，模型恢复后重跑 `index vectors`。
+
 ## Codex Skill
 
 仓库根目录同时也是一个 Codex skill。[SKILL.md](SKILL.md) 保持精简：CLI 负责操作细节和结构化输出，skill 只规定路由、provenance 和时效性边界。

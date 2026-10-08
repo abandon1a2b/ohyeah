@@ -30,10 +30,21 @@ type ServerConfig struct {
 }
 
 type MeilisearchConfig struct {
-	URL       string `mapstructure:"url"`
-	APIKey    string `mapstructure:"api_key"`
-	Index     string `mapstructure:"index"`
-	BatchSize int    `mapstructure:"batch_size"`
+	URL       string          `mapstructure:"url"`
+	APIKey    string          `mapstructure:"api_key"`
+	Index     string          `mapstructure:"index"`
+	BatchSize int             `mapstructure:"batch_size"`
+	Embedding EmbeddingConfig `mapstructure:"embedding"`
+}
+
+type EmbeddingConfig struct {
+	Enabled                  bool    `mapstructure:"enabled"`
+	Name                     string  `mapstructure:"name"`
+	URL                      string  `mapstructure:"url"`
+	Model                    string  `mapstructure:"model"`
+	Dimensions               int     `mapstructure:"dimensions"`
+	DocumentTemplateMaxBytes int     `mapstructure:"document_template_max_bytes"`
+	SemanticRatio            float64 `mapstructure:"semantic_ratio"`
 }
 
 type SyncConfig struct {
@@ -97,6 +108,13 @@ func Load(path string) (Config, error) {
 	v.SetDefault("meilisearch.api_key", "")
 	v.SetDefault("meilisearch.index", "ohyeah_memory_v1")
 	v.SetDefault("meilisearch.batch_size", 100)
+	v.SetDefault("meilisearch.embedding.enabled", false)
+	v.SetDefault("meilisearch.embedding.name", "qwen")
+	v.SetDefault("meilisearch.embedding.url", "http://127.0.0.1:11434/api/embed")
+	v.SetDefault("meilisearch.embedding.model", "qwen3-embedding:0.6b")
+	v.SetDefault("meilisearch.embedding.dimensions", 1024)
+	v.SetDefault("meilisearch.embedding.document_template_max_bytes", 12000)
+	v.SetDefault("meilisearch.embedding.semantic_ratio", 0.5)
 	v.SetDefault("sync.reconcile_interval", "15m")
 	v.SetDefault("sync.debounce", "2s")
 	v.SetDefault("sync.collector_timeout", "5m")
@@ -139,6 +157,14 @@ func Load(path string) (Config, error) {
 	}
 	if cfg.Meilisearch.BatchSize <= 0 {
 		return Config{}, errors.New("meilisearch.batch_size must be positive")
+	}
+	if e := cfg.Meilisearch.Embedding; e.Enabled {
+		if strings.TrimSpace(e.Name) == "" || strings.TrimSpace(e.URL) == "" || strings.TrimSpace(e.Model) == "" || e.Dimensions <= 0 || e.DocumentTemplateMaxBytes <= 0 {
+			return Config{}, errors.New("enabled embedding requires name, url, model and positive dimensions/document_template_max_bytes")
+		}
+		if e.SemanticRatio <= 0 || e.SemanticRatio > 1 {
+			return Config{}, errors.New("embedding.semantic_ratio must be greater than 0 and at most 1; use keyword mode for full-text search")
+		}
 	}
 	if cfg.Sync.ReconcileInterval <= 0 {
 		return Config{}, errors.New("sync.reconcile_interval must be positive")

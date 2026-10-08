@@ -53,3 +53,31 @@ projects:
 		t.Fatal("omitted enabled should default to true")
 	}
 }
+
+func TestEmbeddingConfiguration(t *testing.T) {
+	for _, tc := range []struct {
+		name, settings string
+		invalid        bool
+	}{
+		{"defaults", "", false},
+		{"enabled", "enabled: true", false},
+		{"invalid ratio", "enabled: true\n    semantic_ratio: 1.5", true},
+		{"zero ratio", "enabled: true\n    semantic_ratio: 0", true},
+		{"negative dimensions", "enabled: true\n    dimensions: -1", true},
+		{"missing model", "enabled: true\n    model: ''", true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "config.yaml")
+			if err := os.WriteFile(path, []byte("meilisearch:\n  embedding:\n    "+tc.settings+"\n"), 0600); err != nil {
+				t.Fatal(err)
+			}
+			cfg, err := Load(path)
+			if (err != nil) != tc.invalid {
+				t.Fatalf("error = %v", err)
+			}
+			if err == nil && (cfg.Meilisearch.Embedding.Model != "qwen3-embedding:0.6b" || cfg.Meilisearch.Embedding.SemanticRatio != 0.5) {
+				t.Fatalf("embedding = %#v", cfg.Meilisearch.Embedding)
+			}
+		})
+	}
+}

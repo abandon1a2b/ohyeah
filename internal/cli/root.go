@@ -103,7 +103,22 @@ func newIndexCommand(opts *options) *cobra.Command {
 			return writeOutput(opts, map[string]any{"rebuilt": true, "documents": count}, fmt.Sprintf("rebuilt %d documents", count))
 		},
 	}
-	command.AddCommand(doctor, rebuild)
+	vectors := &cobra.Command{
+		Use: "vectors", Short: "Build the optional vector index from SQLite without changing the full-text index", Args: cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			application, err := openApp(opts)
+			if err != nil {
+				return err
+			}
+			defer application.Close()
+			count, err := application.Syncer.RebuildVectorIndex(cmd.Context())
+			if err != nil {
+				return err
+			}
+			return writeOutput(opts, map[string]any{"vectors": true, "documents": count}, fmt.Sprintf("indexed %d optional vector documents", count))
+		},
+	}
+	command.AddCommand(doctor, rebuild, vectors)
 	return command
 }
 
@@ -400,6 +415,7 @@ func newSyncCommand(opts *options) *cobra.Command {
 
 func newSearchCommand(opts *options) *cobra.Command {
 	var workspace, projectID, typeID, mountID string
+	var mode string
 	var kinds []string
 	var limit int
 	command := &cobra.Command{
@@ -418,6 +434,7 @@ func newSearchCommand(opts *options) *cobra.Command {
 			}
 			defer application.Close()
 			hits, err := application.Syncer.Search(cmd.Context(), model.SearchQuery{
+				Mode:  mode,
 				Query: args[0], ProjectID: projectID, TypeID: typeID, MountID: mountID,
 				WorkspaceID: workspace, Kinds: kinds, Limit: limit,
 			})
@@ -444,6 +461,7 @@ func newSearchCommand(opts *options) *cobra.Command {
 	command.Flags().StringVar(&mountID, "mount", "", "limit results to a canonical mount id")
 	command.Flags().StringSliceVar(&kinds, "kind", nil, "limit results to one or more memory kinds")
 	command.Flags().IntVar(&limit, "limit", 10, "maximum results")
+	command.Flags().StringVar(&mode, "mode", "", "search mode: keyword (default), hybrid or semantic; optional modes fall back to keyword")
 	return command
 }
 

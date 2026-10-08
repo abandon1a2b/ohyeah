@@ -161,6 +161,7 @@ type SyncPreview struct {
 
 type SearchQuery struct {
 	Query       string
+	Mode        string
 	ProjectID   string
 	TypeID      string
 	MountID     string

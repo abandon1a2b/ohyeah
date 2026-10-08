@@ -122,7 +122,11 @@ func New(application *app.App) *fiber.App {
 				kinds = append(kinds, value)
 			}
 		}
-		hits, err := application.Syncer.Search(c.Context(), model.SearchQuery{Query: query, ProjectID: c.Query("project"), TypeID: c.Query("type"), MountID: c.Query("mount"), WorkspaceID: c.Query("workspace"), Kinds: kinds, Limit: limit})
+		mode := c.Query("mode")
+		if mode != "" && mode != "keyword" && mode != "hybrid" && mode != "semantic" {
+			return fiber.NewError(fiber.StatusBadRequest, "mode must be keyword, hybrid or semantic")
+		}
+		hits, err := application.Syncer.Search(c.Context(), model.SearchQuery{Query: query, Mode: mode, ProjectID: c.Query("project"), TypeID: c.Query("type"), MountID: c.Query("mount"), WorkspaceID: c.Query("workspace"), Kinds: kinds, Limit: limit})
 		if err != nil {
 			return err
 		}
