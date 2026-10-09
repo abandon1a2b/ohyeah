@@ -2,9 +2,11 @@ package syncer
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
+	"reflect"
 	"sync"
 	"time"
 
@@ -308,33 +310,95 @@ func (s *Service) RebuildIndex(ctx context.Context) (int64, error) {
 	return indexed, nil
 }
 
-func (s *Service) RebuildVectorIndex(ctx context.Context) (int64, error) {
+type VectorSyncResult struct {
+	Updated   int64 `json:"updated"`
+	Unchanged int64 `json:"unchanged"`
+	Deleted   int64 `json:"deleted"`
+}
+
+func (s *Service) SyncVectorIndex(ctx context.Context, rebuild, dryRun bool) (VectorSyncResult, error) {
 	backend, ok := s.backend.(interface {
 		ResetVectors(context.Context) error
+		EnsureVectors(context.Context) error
+		VectorDocuments(context.Context) (map[string]model.MemoryUnit, error)
 		UpsertVectors(context.Context, [][]byte) error
+		DeleteVectors(context.Context, []string) error
 	})
 	if !ok {
-		return 0, errors.New("backend does not support vectors")
+		return VectorSyncResult{}, errors.New("backend does not support vectors")
 	}
-	if err := backend.ResetVectors(ctx); err != nil {
-		return 0, err
+	if rebuild && dryRun {
+		return VectorSyncResult{}, errors.New("vector rebuild cannot be a dry run")
+	}
+	if rebuild {
+		if err := backend.ResetVectors(ctx); err != nil {
+			return VectorSyncResult{}, err
+		}
+	} else if !dryRun {
+		if err := backend.EnsureVectors(ctx); err != nil {
+			return VectorSyncResult{}, err
+		}
+	}
+	existing, err := backend.VectorDocuments(ctx)
+	if err != nil {
+		return VectorSyncResult{}, err
 	}
 	var afterID string
-	var indexed int64
+	var result VectorSyncResult
 	for {
-		payloads, nextID, err := s.store.MemoryPayloadBatch(ctx, afterID, 16)
+		payloads, nextID, err := s.store.MemoryPayloadBatch(ctx, afterID, 500)
 		if err != nil {
-			return indexed, err
+			return result, err
 		}
 		if len(payloads) == 0 {
-			return indexed, nil
+			break
 		}
-		if err := backend.UpsertVectors(ctx, payloads); err != nil {
-			return indexed, err
+		changed := make([][]byte, 0, len(payloads))
+		for _, payload := range payloads {
+			var unit model.MemoryUnit
+			if err := json.Unmarshal(payload, &unit); err != nil {
+				return result, err
+			}
+			previous, found := existing[unit.ID]
+			delete(existing, unit.ID)
+			unit.Content = ""
+			if found && reflect.DeepEqual(previous, unit) {
+				result.Unchanged++
+				continue
+			}
+			changed = append(changed, payload)
 		}
-		indexed += int64(len(payloads))
+		if !dryRun {
+			for offset := 0; offset < len(changed); offset += 64 {
+				end := min(offset+64, len(changed))
+				if err := backend.UpsertVectors(ctx, changed[offset:end]); err != nil {
+					return result, err
+				}
+			}
+		}
+		result.Updated += int64(len(changed))
 		afterID = nextID
 	}
+	ids := make([]string, 0, 500)
+	for id := range existing {
+		ids = append(ids, id)
+		if len(ids) == 500 {
+			if !dryRun {
+				if err := backend.DeleteVectors(ctx, ids); err != nil {
+					return result, err
+				}
+			}
+			result.Deleted += int64(len(ids))
+			ids = ids[:0]
+		}
+	}
+	if !dryRun {
+		if err := backend.DeleteVectors(ctx, ids); err != nil {
+			return result, err
+		}
+	}
+	result.Deleted += int64(len(ids))
+	return result, nil
 }
 
 func (s *Service) Doctor(ctx context.Context) (DoctorResult, error) {

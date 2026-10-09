@@ -49,6 +49,57 @@ func TestSearchModes(t *testing.T) {
 	}
 }
 
+func TestKeywordSearchDoesNotUseEmbedding(t *testing.T) {
+	embedRequests := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if r.URL.Path == "/embed" {
+			embedRequests++
+			w.WriteHeader(http.StatusServiceUnavailable)
+			return
+		}
+		if r.URL.Path != "/indexes/test/search" {
+			t.Errorf("unexpected request %s", r.URL.Path)
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+		var request struct {
+			Hybrid any `json:"hybrid"`
+			Vector any `json:"vector"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+			t.Error(err)
+		}
+		if request.Hybrid != nil || request.Vector != nil {
+			t.Errorf("keyword request included vector options: %#v", request)
+		}
+		fmt.Fprint(w, `{"hits":[{"id":"db","title":"database","_formatted":{"content":"connections"}}],"processingTimeMs":0,"query":"database","estimatedTotalHits":1}`)
+	}))
+	defer server.Close()
+	backend := NewMeilisearch(config.MeilisearchConfig{URL: server.URL, Index: "test", Embedding: config.EmbeddingConfig{Enabled: true, Name: "qwen", URL: server.URL + "/embed", SemanticRatio: 0.5}})
+	hits, err := backend.Search(context.Background(), model.SearchQuery{Query: "database", Limit: 1})
+	if err != nil || len(hits) != 1 || hits[0].Unit.ID != "db" || embedRequests != 0 {
+		t.Fatalf("hits=%#v error=%v embedding requests=%d", hits, err, embedRequests)
+	}
+}
+
+func TestVectorDocumentsMissingIndexIsEmpty(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !strings.HasPrefix(r.URL.Path, "/indexes/test_vectors_") || !strings.HasSuffix(r.URL.Path, "/documents/fetch") {
+			t.Errorf("unexpected request %s", r.URL.Path)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusNotFound)
+		fmt.Fprint(w, `{"code":"index_not_found","message":"missing","type":"invalid_request"}`)
+	}))
+	defer server.Close()
+	backend := NewMeilisearch(config.MeilisearchConfig{URL: server.URL, Index: "test", Embedding: config.EmbeddingConfig{Name: "qwen", Model: "test", Dimensions: 2}})
+	documents, err := backend.VectorDocuments(context.Background())
+	if err != nil || len(documents) != 0 {
+		t.Fatalf("documents=%#v error=%v", documents, err)
+	}
+}
+
 func TestQwenIntegration(t *testing.T) {
 	if os.Getenv("OHYEAH_TEST_QWEN") != "1" {
 		t.Skip("requires local Meilisearch and Ollama Qwen")

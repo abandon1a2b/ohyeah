@@ -103,21 +103,25 @@ func newIndexCommand(opts *options) *cobra.Command {
 			return writeOutput(opts, map[string]any{"rebuilt": true, "documents": count}, fmt.Sprintf("rebuilt %d documents", count))
 		},
 	}
+	var rebuildVectors bool
+	var previewVectors bool
 	vectors := &cobra.Command{
-		Use: "vectors", Short: "Build the optional vector index from SQLite without changing the full-text index", Args: cobra.NoArgs,
+		Use: "vectors", Short: "Update the optional vector index from SQLite without changing the full-text index", Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			application, err := openApp(opts)
 			if err != nil {
 				return err
 			}
 			defer application.Close()
-			count, err := application.Syncer.RebuildVectorIndex(cmd.Context())
+			result, err := application.Syncer.SyncVectorIndex(cmd.Context(), rebuildVectors, previewVectors)
 			if err != nil {
 				return err
 			}
-			return writeOutput(opts, map[string]any{"vectors": true, "documents": count}, fmt.Sprintf("indexed %d optional vector documents", count))
+			return writeOutput(opts, result, fmt.Sprintf("vectors updated=%d unchanged=%d deleted=%d", result.Updated, result.Unchanged, result.Deleted))
 		},
 	}
+	vectors.Flags().BoolVar(&rebuildVectors, "rebuild", false, "discard and rebuild all optional vectors")
+	vectors.Flags().BoolVar(&previewVectors, "dry-run", false, "report pending vector changes without writing")
 	command.AddCommand(doctor, rebuild, vectors)
 	return command
 }

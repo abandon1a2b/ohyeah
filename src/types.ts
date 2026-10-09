@@ -1,6 +1,6 @@
 export type Stats = { sources: number; objects: number; memoryUnits: number; relations: number; pendingOutbox: number; failedOutbox: number }
 export type Doctor = { sqliteCount: number; meilisearchCount: number; indexExists: boolean; consistent: boolean }
-export type Status = { backend: string; stats: Stats; statePath: string; index: string; doctor: Doctor; doctorError?: string }
+export type Status = { backend: string; stats: Stats; statePath: string; index: string; embeddingEnabled: boolean; doctor: Doctor; doctorError?: string }
 export type Project = { id: string; workspace: string; enabled: boolean; state: string }
 export type Source = { id: string; projectId: string; typeId: string; mountName: string; path: string; enabled: boolean; state: string; managedBy: string; typeRevision: number; mountRevision: number; options?: Record<string, unknown>; cursor?: unknown; updatedAt: string }
 export type SyncRun = { id: number; sourceId: string; status: string; scanned: number; changed: number; deleted: number; error?: string; startedAt: string; finishedAt?: string }

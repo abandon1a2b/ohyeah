@@ -89,6 +89,7 @@ export default function App() {
     project: string;
     mount: string;
     kind: string;
+    mode: string;
   }) => {
     if (!query.trim()) return;
     setSearching(true);
@@ -97,6 +98,7 @@ export default function App() {
       if (filters.project) params.set("project", filters.project);
       if (filters.mount) params.set("mount", filters.mount);
       if (filters.kind) params.set("kind", filters.kind);
+      if (filters.mode !== "keyword") params.set("mode", filters.mode);
       setHits(await api.search(params));
     } catch (error) {
       setNotice({ kind: "error", text: (error as Error).message });
@@ -229,6 +231,7 @@ export default function App() {
                 {page === "search" && (
                   <SearchPage
                     query={query}
+                    embeddingEnabled={status?.embeddingEnabled === true}
                     setQuery={setQuery}
                     hits={hits}
                     projects={projects}

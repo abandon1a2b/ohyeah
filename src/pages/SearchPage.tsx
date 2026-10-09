@@ -12,10 +12,12 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import type { Project, SearchHit, Source } from "../types";
 
 export function SearchPage({
   query,
+  embeddingEnabled,
   setQuery,
   hits,
   projects,
@@ -25,21 +27,24 @@ export function SearchPage({
   onSelect,
 }: {
   query: string;
+  embeddingEnabled: boolean;
   setQuery: (v: string) => void;
   hits: SearchHit[];
   projects: Project[];
   sources: Source[];
   loading: boolean;
-  onSearch: (filters: { project: string; mount: string; kind: string }) => void;
+  onSearch: (filters: { project: string; mount: string; kind: string; mode: string }) => void;
   onSelect: (id: string) => void;
 }) {
   const [project, setProject] = useState("all"),
     [mount, setMount] = useState("all"),
-    [kind, setKind] = useState("all");
+    [kind, setKind] = useState("all"),
+    [mode, setMode] = useState("keyword");
   const filters = {
     project: project === "all" ? "" : project,
     mount: mount === "all" ? "" : mount,
     kind: kind === "all" ? "" : kind,
+    mode: embeddingEnabled ? mode : "keyword",
   };
   const visibleSources = sources.filter(
     (source) =>
@@ -68,6 +73,11 @@ export function SearchPage({
           {loading ? <Spinner label="搜索中" /> : "搜索"}
         </Button>
       </form>
+      {embeddingEnabled && <ToggleGroup type="single" variant="outline" value={mode} onValueChange={(value) => value && setMode(value)} aria-label="检索模式" className="self-start">
+        <ToggleGroupItem value="keyword">关键词</ToggleGroupItem>
+        <ToggleGroupItem value="hybrid">混合</ToggleGroupItem>
+        <ToggleGroupItem value="semantic">语义</ToggleGroupItem>
+      </ToggleGroup>}
       <FieldGroup className="grid gap-3 sm:grid-cols-3">
         <Field>
           <FieldLabel>项目</FieldLabel>

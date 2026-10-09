@@ -44,6 +44,59 @@ func (m *Meilisearch) ResetVectors(ctx context.Context) error {
 	return m.wait(task.TaskUID)
 }
 
+func (m *Meilisearch) EnsureVectors(ctx context.Context) error {
+	if !m.embedding.Enabled {
+		return fmt.Errorf("embedding is disabled")
+	}
+	if _, err := m.client.GetIndex(m.vectorIndex()); err != nil {
+		if !isNotFound(err) {
+			return err
+		}
+		return m.ResetVectors(ctx)
+	}
+	return nil
+}
+
+func (m *Meilisearch) VectorDocuments(ctx context.Context) (map[string]model.MemoryUnit, error) {
+	const pageSize = 5000
+	fields := []string{"id", "objectId", "projectId", "typeId", "mountId", "workspaceId", "sourceId", "sourceType", "kind", "title", "threadId", "turnId", "path", "heading", "occurredAt", "contentHash", "status", "requirementIds", "repos", "entities", "metadata"}
+	documents := make(map[string]model.MemoryUnit)
+	for offset := int64(0); ; offset += pageSize {
+		var page meilisearch.DocumentsResult
+		if err := m.client.Index(m.vectorIndex()).GetDocumentsWithContext(ctx, &meilisearch.DocumentsQuery{Offset: offset, Limit: pageSize, Fields: fields}, &page); err != nil {
+			if isNotFound(err) && offset == 0 {
+				return documents, nil
+			}
+			return nil, err
+		}
+		for _, raw := range page.Results {
+			encoded, err := json.Marshal(raw)
+			if err != nil {
+				return nil, err
+			}
+			var unit model.MemoryUnit
+			if err := json.Unmarshal(encoded, &unit); err != nil {
+				return nil, err
+			}
+			documents[unit.ID] = unit
+		}
+		if offset+int64(len(page.Results)) >= page.Total || len(page.Results) == 0 {
+			return documents, nil
+		}
+	}
+}
+
+func (m *Meilisearch) DeleteVectors(ctx context.Context, ids []string) error {
+	if len(ids) == 0 {
+		return nil
+	}
+	task, err := m.client.Index(m.vectorIndex()).DeleteDocumentsWithContext(ctx, ids, nil)
+	if err != nil {
+		return err
+	}
+	return m.wait(task.TaskUID)
+}
+
 func (m *Meilisearch) embed(ctx context.Context, texts []string) ([][]float32, error) {
 	body, err := json.Marshal(map[string]any{"model": m.embedding.Model, "input": texts})
 	if err != nil {
@@ -54,7 +107,7 @@ func (m *Meilisearch) embed(ctx context.Context, texts []string) ([][]float32, e
 		return nil, err
 	}
 	req.Header.Set("Content-Type", "application/json")
-	client := &http.Client{Timeout: 30 * time.Second}
+	client := &http.Client{Timeout: 2 * time.Minute}
 	response, err := client.Do(req)
 	if err != nil {
 		return nil, err

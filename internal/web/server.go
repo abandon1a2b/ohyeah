@@ -57,7 +57,7 @@ func New(application *app.App) *fiber.App {
 			backend = err.Error()
 		}
 		doctor, doctorErr := application.Syncer.Doctor(c.Context())
-		return c.JSON(fiber.Map{"backend": backend, "stats": stats, "statePath": application.Config.StatePath, "index": application.Config.Meilisearch.Index, "doctor": doctor, "doctorError": errorString(doctorErr)})
+		return c.JSON(fiber.Map{"backend": backend, "stats": stats, "statePath": application.Config.StatePath, "index": application.Config.Meilisearch.Index, "embeddingEnabled": application.Config.Meilisearch.Embedding.Enabled, "doctor": doctor, "doctorError": errorString(doctorErr)})
 	})
 	api.Get("/projects", func(c *fiber.Ctx) error {
 		projects, err := application.Store.ListProjects(c.Context())

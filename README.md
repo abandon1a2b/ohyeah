@@ -203,16 +203,19 @@ OHYEAH_STATE_PATH
 启动本机 Ollama 并下载 `qwen3-embedding:0.6b` 后，在配置中启用
 `meilisearch.embedding.enabled: true`，其他参数参考 `config.example.yaml`。
 向量能力是可选增强。默认搜索始终为全文检索，初始化、同步、主索引重建
-和诊断均不依赖 Ollama。`ohyeah index vectors` 单独从 SQLite 构建
-`<主索引名>_vectors_<配置哈希>`；更换模型、维度或输入长度后不会误用旧向量。
+和诊断均不依赖 Ollama。`ohyeah index vectors` 增量维护
+`<主索引名>_vectors_<配置哈希>`：只为新增或变化的记忆生成向量，并移除已删除记录。
+`ohyeah index vectors --dry-run` 只报告待更新数量，`--rebuild` 才清空并全量重算。
+更换模型、维度或输入长度后会使用新的向量索引，不会误用旧向量。
 应用先调用 Ollama，再将向量以 userProvided 方式提交，
 Meilisearch 索引任务不调用模型服务。向量构建失败不影响主全文索引或 outbox。
 
-CLI 可通过 `--mode hybrid|semantic` 主动使用向量；HTTP 搜索接口接受同名
-`mode` 参数。向量未启用、索引缺失或模型不可用时自动回退全文；查询模型的
+CLI 可通过 `--mode hybrid|semantic` 主动使用向量；Web UI 搜索页也可选择
+关键词、混合或语义模式，HTTP 搜索接口接受同名 `mode` 参数。当前只返回检索
+结果，不生成回答。向量未启用、索引缺失或模型不可用时自动回退全文；查询模型的
 等待上限为 2 秒，普通全文查询完全不调用模型。更新或删除后的旧向量结果会
-通过主索引的记录、contentHash 和元数据检查过滤，向量数据需再次执行 `index vectors`
-更新；当前尚未自动增量维护向量。
+通过主索引的记录、contentHash 和元数据检查过滤。同步新数据后再次运行
+`index vectors` 即可增量更新向量；当前尚未在普通同步中自动更新向量。
 
 修改 embedding 配置后需要重启 ohyeah 服务。向量化输入为标题与正文，
 最长 12000 字节，超过时裁剪；当前 Ollama 上下文为 4096 token，长文档尚未

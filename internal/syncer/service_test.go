@@ -2,6 +2,7 @@ package syncer
 
 import (
 	"context"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"sync"
@@ -12,6 +13,100 @@ import (
 	"github.com/abandon1a2b/ohyeah/internal/model"
 	"github.com/abandon1a2b/ohyeah/internal/store"
 )
+
+type vectorBackend struct {
+	recordingBackend
+	documents map[string]model.MemoryUnit
+}
+
+func (b *vectorBackend) ResetVectors(context.Context) error {
+	b.documents = make(map[string]model.MemoryUnit)
+	return nil
+}
+func (b *vectorBackend) EnsureVectors(context.Context) error {
+	if b.documents == nil {
+		b.documents = make(map[string]model.MemoryUnit)
+	}
+	return nil
+}
+func (b *vectorBackend) VectorDocuments(context.Context) (map[string]model.MemoryUnit, error) {
+	result := make(map[string]model.MemoryUnit, len(b.documents))
+	for id, unit := range b.documents {
+		result[id] = unit
+	}
+	return result, nil
+}
+func (b *vectorBackend) UpsertVectors(_ context.Context, payloads [][]byte) error {
+	for _, payload := range payloads {
+		var unit model.MemoryUnit
+		if err := json.Unmarshal(payload, &unit); err != nil {
+			return err
+		}
+		unit.Content = ""
+		b.documents[unit.ID] = unit
+	}
+	return nil
+}
+func (b *vectorBackend) DeleteVectors(_ context.Context, ids []string) error {
+	for _, id := range ids {
+		delete(b.documents, id)
+	}
+	return nil
+}
+
+func TestSyncVectorIndexIsIncremental(t *testing.T) {
+	ctx := context.Background()
+	state, err := store.Open(filepath.Join(t.TempDir(), "state.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer state.Close()
+	source := model.Source{ID: "docs", WorkspaceID: "test", Driver: model.DriverCommand, Path: t.TempDir(), Enabled: true}
+	if err := state.UpsertSource(ctx, source); err != nil {
+		t.Fatal(err)
+	}
+	backend := &vectorBackend{}
+	service := New(state, backend, config.Config{})
+	writeDocument := func(hash, title string) {
+		t.Helper()
+		now := time.Now().UTC()
+		if err := state.ReplaceDocument(ctx, model.Document{
+			Object: model.SourceObject{ID: "object", SourceID: source.ID, ExternalID: "one", ContentHash: hash, ModifiedAt: now},
+			Units:  []model.MemoryUnit{{ID: "unit", WorkspaceID: "test", SourceID: source.ID, SourceType: "fixture", Kind: model.KindDocument, Title: title, Content: "body", OccurredAt: now, ContentHash: hash, Status: model.StatusObserved}},
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	writeDocument("v1", "first")
+	check := func(rebuild, dryRun bool, updated, unchanged, deleted int64) {
+		t.Helper()
+		result, err := service.SyncVectorIndex(ctx, rebuild, dryRun)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if result != (VectorSyncResult{Updated: updated, Unchanged: unchanged, Deleted: deleted}) {
+			t.Fatalf("vector result = %#v", result)
+		}
+	}
+	check(false, true, 1, 0, 0)
+	if len(backend.documents) != 0 {
+		t.Fatal("dry run modified vector index")
+	}
+	check(false, false, 1, 0, 0)
+	check(false, false, 0, 1, 0)
+	check(true, false, 1, 0, 0)
+	writeDocument("v2", "second")
+	check(false, true, 1, 0, 0)
+	check(false, false, 1, 0, 0)
+	if backend.documents["unit"].Title != "second" {
+		t.Fatal("changed vector metadata was not updated")
+	}
+	if _, err := state.DeleteObjects(ctx, source.ID, []string{"one"}); err != nil {
+		t.Fatal(err)
+	}
+	check(false, false, 0, 0, 1)
+	check(false, false, 0, 0, 0)
+}
 
 type recordingBackend struct {
 	mu    sync.Mutex
