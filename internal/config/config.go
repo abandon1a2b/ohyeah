@@ -25,6 +25,7 @@ type Config struct {
 	Sync             SyncConfig               `mapstructure:"sync"`
 	Projects         map[string]ProjectConfig `mapstructure:"projects"`
 	Server           ServerConfig             `mapstructure:"server"`
+	Auth             AuthConfig               `mapstructure:"auth"`
 	HasProjectConfig bool                     `mapstructure:"-"`
 }
 
@@ -140,6 +141,10 @@ func Load(path string) (Config, error) {
 	v.SetDefault("sync.collector_timeout", "5m")
 	v.SetDefault("sync.max_file_size", 256<<20)
 	v.SetDefault("server.address", "127.0.0.1:8787")
+	v.SetDefault("auth.mode", "local")
+	v.SetDefault("auth.session_ttl", "8h")
+	v.SetDefault("auth.token_ttl", "24h")
+	v.SetDefault("auth.oidc.client_secret", "")
 
 	if path != "" {
 		v.SetConfigFile(path)
@@ -213,6 +218,9 @@ func Load(path string) (Config, error) {
 		return Config{}, errors.New("sync.collector_timeout must be positive")
 	}
 	if err := cfg.ValidateProjects(); err != nil {
+		return Config{}, err
+	}
+	if err := cfg.ValidateAuth(); err != nil {
 		return Config{}, err
 	}
 	return cfg, nil

@@ -1,4 +1,4 @@
-import { RefreshCw } from "lucide-react";
+import { RefreshCw, LogOut } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
 import { SidebarTrigger } from "@/components/ui/sidebar";
@@ -6,9 +6,11 @@ import { SidebarTrigger } from "@/components/ui/sidebar";
 export function SiteHeader({
   title,
   onRefresh,
+  onLogout,
 }: {
   title: string;
   onRefresh: () => void;
+  onLogout?: () => void;
 }) {
   return (
     <header className="flex h-(--header-height) shrink-0 items-center gap-2 border-b transition-[width,height] ease-linear group-has-data-[collapsible=icon]/sidebar-wrapper:h-(--header-height)">
@@ -28,6 +30,7 @@ export function SiteHeader({
         >
           <RefreshCw />
         </Button>
+        {onLogout && <Button size="icon-sm" variant="ghost" aria-label="退出登录" title="退出登录" onClick={onLogout}><LogOut /></Button>}
       </div>
     </header>
   );

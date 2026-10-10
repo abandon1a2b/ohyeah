@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
+import { AuthGate, logout, type Identity } from './auth';
 import { api } from "./api";
 import { Badge, Notice } from "./components";
 import { AppSidebar, navigation, type Page } from "@/components/app-sidebar";
@@ -31,7 +32,12 @@ import type {
 } from "./types";
 
 export default function App() {
-  const [page, setPage] = useState<Page>("dashboard");
+  return <AuthGate>{identity => <Workspace identity={identity} />}</AuthGate>;
+}
+
+function Workspace({ identity }: { identity: Identity | null }) {
+  const admin = identity === null || identity.admin;
+  const [page, setPage] = useState<Page>(admin ? "dashboard" : "search");
   const [status, setStatus] = useState<Status | null>(null);
   const [projects, setProjects] = useState<Project[]>([]);
   const [sources, setSources] = useState<Source[]>([]);
@@ -56,16 +62,16 @@ export default function App() {
         api.status(),
         api.projects(),
         api.sources(),
-        api.runs(),
+        admin ? api.runs() : Promise.resolve([]),
       ]);
       setStatus(s);
       setProjects(p);
       setSources(src);
-      setRuns(r);
+      setRuns(admin ? r : (await Promise.all(src.map(source => api.runs(1, source.id)))).flat());
     } catch (error) {
       if (!silent) setNotice({ kind: "error", text: (error as Error).message });
     }
-  }, []);
+  }, [admin]);
 
   useEffect(() => {
     load();
@@ -203,9 +209,10 @@ export default function App() {
           page={page}
           backendAvailable={status?.backend === "available"}
           onNavigate={changePage}
+          admin={admin}
         />
         <SidebarInset>
-          <SiteHeader title={title} onRefresh={() => load()} />
+          <SiteHeader title={title} onRefresh={() => load()} onLogout={identity ? () => logout().catch(error => setNotice({ kind: 'error', text: error.message })) : undefined} />
           <div className="flex flex-1 flex-col">
             <div className="@container/main flex flex-1 flex-col gap-2">
               <div
@@ -239,6 +246,7 @@ export default function App() {
                     loading={searching}
                     onSearch={search}
                     onSelect={selectMemory}
+                    requireProject={identity !== null}
                   />
                 )}
                 {page === "sources" && (
@@ -247,6 +255,8 @@ export default function App() {
                     runs={runs}
                     busy={busy}
                     onSync={sync}
+                    canSyncAll={admin}
+                    canSync={source => admin || (identity?.syncProjects ?? []).includes(source.projectId)}
                   />
                 )}
                 {page === "config" && (

@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/abandon1a2b/ohyeah/internal/auth"
 	"github.com/abandon1a2b/ohyeah/internal/config"
 	"github.com/abandon1a2b/ohyeah/internal/managed"
 	"github.com/abandon1a2b/ohyeah/internal/search"
@@ -16,6 +17,7 @@ type App struct {
 	Store   *store.Store
 	Backend search.Backend
 	Syncer  *syncer.Service
+	Auth    *auth.Service
 }
 
 func Open(configPath string) (*App, error) {

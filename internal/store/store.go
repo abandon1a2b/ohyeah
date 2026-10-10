@@ -75,11 +75,14 @@ func (s *Store) migrate(ctx context.Context) error {
 	if err := s.db.QueryRowContext(ctx, `PRAGMA user_version`).Scan(&version); err != nil {
 		return err
 	}
-	if version > 4 {
+	if version > 5 {
 		return fmt.Errorf("state database schema version %d is newer than this ohyeah binary", version)
 	}
-	if version == 4 {
+	if version == 5 {
 		return nil
+	}
+	if version == 4 {
+		return s.migrateAuth(ctx)
 	}
 	if version == 3 {
 		tx, err := s.db.BeginTx(ctx, nil)
@@ -96,7 +99,10 @@ func (s *Store) migrate(ctx context.Context) error {
 		if _, err := tx.ExecContext(ctx, `PRAGMA user_version=4`); err != nil {
 			return err
 		}
-		return tx.Commit()
+		if err := tx.Commit(); err != nil {
+			return err
+		}
+		return s.migrateAuth(ctx)
 	}
 	const schema = `
 CREATE TABLE IF NOT EXISTS projects (
@@ -240,7 +246,10 @@ ON CONFLICT(component) DO UPDATE SET version=excluded.version, updated_at=exclud
 		return err
 	}
 	_, err := s.db.ExecContext(ctx, `PRAGMA user_version=4`)
-	return err
+	if err != nil {
+		return err
+	}
+	return s.migrateAuth(ctx)
 }
 
 func (s *Store) migrateSourceConfigColumns(ctx context.Context) error {

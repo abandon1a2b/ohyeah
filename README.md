@@ -264,11 +264,23 @@ node scripts/ohyeah.mjs get <memory-id> --json
 node scripts/ohyeah.mjs status --json
 ```
 
-下载脚本的默认地址来自服务配置；`--server URL` 或环境变量 `OHYEAH_SERVER` 可覆盖地址，命令行优先。跨机器访问时必须设置客户端可达的地址。服务绑定 `0.0.0.0` 或 `::` 时，下载包默认仍指向 loopback，不会从不受信任的请求 Host 推断地址。
+下载脚本的默认地址来自服务配置；OIDC 模式使用 `auth.public_url`，本地模式使用监听地址。`--server URL` 或环境变量 `OHYEAH_SERVER` 可覆盖地址，命令行优先。不会从不受信任的请求 Host 推断地址。
 
 两种客户端都提供 `projects`、`search`、`get`、`status`，始终输出 JSON，支持 `--help`、`--json` 和 `--timeout`（默认 10 秒）。`search` 要求 `--project`，支持 `--type`、`--mount`、`--workspace`、`--kind`、`--mode` 和 `--limit`。退出码统一为：0 成功，1 HTTP/网络错误，2 参数错误；错误 JSON 写到 stderr。
 
-当前 HTTP API 没有内置鉴权，默认保持本地访问。远程使用应通过有鉴权的私有隧道或反向代理接入；客户端 Skill 下载并不改变配置写入和索引管理 API 的访问权限。
+中央多人部署使用 `auth.mode: oidc`：服务端通过 OIDC 登录验证身份，按项目授权，向 CLI 签发只保存哈希的有期限、可撤销令牌。个人模式默认 `auth.mode: local`，只允许绑定 loopback IP。OIDC 模式的 Web UI 支持登录、退出和权限控制。配置、接入身份服务、客户端授权、机器账号和权限边界见 [Authorization](docs/authorization.md)。
+
+```bash
+python3 scripts/ohyeah.py login
+node scripts/ohyeah.mjs login --no-browser
+python3 scripts/ohyeah.py whoami
+python3 scripts/ohyeah.py tokens
+python3 scripts/ohyeah.py revoke <credential-id>
+python3 scripts/ohyeah.py sync <project/type/mount>
+python3 scripts/ohyeah.py logout
+```
+
+两个客户端共享按服务地址隔离的凭据文件；无人值守账号可通过 `OHYEAH_TOKEN` 提供管理员签发的令牌。登录命令不会打印令牌。令牌过期后重新登录，当前没有自动刷新或 OIDC provider refresh token 存储。
 
 ### 验证
 

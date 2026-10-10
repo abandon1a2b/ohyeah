@@ -17,7 +17,7 @@ import (
 //go:embed assets
 var assets embed.FS
 
-const Version = "1"
+const Version = "2"
 
 type client struct{ file, run, requirement string }
 
@@ -26,7 +26,7 @@ var clients = map[string]client{
 	"node":   {"ohyeah.mjs", "node", "Node.js 18+"},
 }
 
-func Register(server *fiber.App, address string) {
+func Register(server *fiber.App, address string, publicURL ...string) {
 	host, port, err := net.SplitHostPort(address)
 	if err != nil {
 		host, port = "127.0.0.1", "8787"
@@ -35,6 +35,9 @@ func Register(server *fiber.App, address string) {
 		host = "127.0.0.1"
 	}
 	defaultURL := "http://" + net.JoinHostPort(host, port)
+	if len(publicURL) > 0 && publicURL[0] != "" {
+		defaultURL = strings.TrimRight(publicURL[0], "/")
+	}
 	server.Get("/downloads", func(c *fiber.Ctx) error {
 		return c.JSON(fiber.Map{"version": Version, "server": defaultURL, "clients": fiber.Map{
 			"python": fiber.Map{"bundle": "/downloads/python.zip", "skill": "/downloads/python/SKILL.md", "cli": "/downloads/python/ohyeah.py", "requires": clients["python"].requirement},
@@ -117,6 +120,7 @@ Replace <skill-directory> with the absolute directory containing this SKILL.md.
 Requires %s. Run %s --help before use.
 
 The packaged default service is %s. Override it with OHYEAH_SERVER or --server URL when the service runs on another machine.
+For central deployments, run the client login command and confirm the matching code in the browser; --no-browser prints the URL for manual use. Use whoami to check identity and logout to revoke the current token. Never print, upload, or commit credentials. OHYEAH_TOKEN is available for unattended service accounts. Tokens have a fixed expiry; login again when expired.
 
 Find project IDs with %s projects --json. Search with %s search "2-8 relevant keywords" --project ID --json; optionally add --type, --mount, --kind or --mode. Always specify --project.
 Read full records and provenance with %s get ID --json. Check availability with %s status --json.
@@ -131,10 +135,11 @@ Example:
 
     %s scripts/%s --server %s search "root cause verification" --project example --json
 
-Commands: projects, search, get, status. Run --help for options. Output is always JSON.
+Commands: projects, search, get, status, login, logout, whoami, tokens, revoke ID, sync SOURCE_ID. Run --help for options. Output is always JSON.
 Exit codes: 0 success, 1 HTTP/transport error, 2 invalid arguments.
 Default request timeout: 10 seconds; override with --timeout SECONDS.
-OHYEAH_SERVER or --server overrides the packaged service URL. For remote access, use an authenticated private tunnel or reverse proxy; the Ohyeah API has no built-in authentication.
+OHYEAH_SERVER or --server overrides the packaged service URL. Central services use OIDC browser login and locally issued revocable API tokens. Run login (or login --no-browser), compare the CLI code with the browser page, and approve. No token is printed on login.
+Credentials are stored per service under ~/.config/ohyeah/credentials with mode 0600 on Unix; OHYEAH_CREDENTIALS_DIR overrides this directory. Python and Node.js share the same credential files. Use operating-system ACLs on Windows. OHYEAH_TOKEN overrides saved credentials for service accounts. Use tokens to list credentials, revoke ID to revoke one, and logout to revoke the current token and remove its saved file. Expired tokens require login again. Authenticated remote requests require HTTPS; HTTP is allowed for loopback IPs.
 Distribution version: %s.
 `, client.requirement, client.file, client.run, client.file, serverURL, Version)
 	return map[string][]byte{"scripts/" + client.file: script, "SKILL.md": []byte(strings.TrimSpace(skill) + "\n"), "README.md": []byte(readme)}, nil

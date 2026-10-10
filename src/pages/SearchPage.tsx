@@ -25,6 +25,7 @@ export function SearchPage({
   loading,
   onSearch,
   onSelect,
+  requireProject = false,
 }: {
   query: string;
   embeddingEnabled: boolean;
@@ -35,20 +36,22 @@ export function SearchPage({
   loading: boolean;
   onSearch: (filters: { project: string; mount: string; kind: string; mode: string }) => void;
   onSelect: (id: string) => void;
+  requireProject?: boolean;
 }) {
   const [project, setProject] = useState("all"),
     [mount, setMount] = useState("all"),
     [kind, setKind] = useState("all"),
     [mode, setMode] = useState("keyword");
+  const resolvedProject = project === "all" && requireProject ? (projects[0]?.id ?? '') : project;
   const filters = {
-    project: project === "all" ? "" : project,
+    project: resolvedProject === "all" ? "" : resolvedProject,
     mount: mount === "all" ? "" : mount,
     kind: kind === "all" ? "" : kind,
     mode: embeddingEnabled ? mode : "keyword",
   };
   const visibleSources = sources.filter(
     (source) =>
-      source.enabled && (project === "all" || source.projectId === project),
+      source.enabled && (resolvedProject === "all" || source.projectId === resolvedProject),
   );
   return (
     <div className="flex flex-col gap-6">
@@ -69,7 +72,7 @@ export function SearchPage({
             aria-label="搜索工作记忆"
           />
         </div>
-        <Button type="submit" disabled={loading || !query.trim()}>
+        <Button type="submit" disabled={loading || !query.trim() || (requireProject && !resolvedProject)}>
           {loading ? <Spinner label="搜索中" /> : "搜索"}
         </Button>
       </form>
@@ -82,7 +85,7 @@ export function SearchPage({
         <Field>
           <FieldLabel>项目</FieldLabel>
           <Select
-            value={project}
+            value={resolvedProject}
             onValueChange={(value) => {
               setProject(value);
               setMount("all");
@@ -93,7 +96,7 @@ export function SearchPage({
             </SelectTrigger>
             <SelectContent>
               <SelectGroup>
-                <SelectItem value="all">全部项目</SelectItem>
+                {!requireProject && <SelectItem value="all">全部项目</SelectItem>}
                 {projects.map((p) => (
                   <SelectItem key={p.id} value={p.id}>
                     {p.id}

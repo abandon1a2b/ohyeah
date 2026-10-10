@@ -35,11 +35,13 @@ export function AppSidebar({
   page,
   backendAvailable,
   onNavigate,
+  admin = true,
   ...props
 }: {
   page: Page;
   backendAvailable: boolean;
   onNavigate: (page: Page) => void;
+  admin?: boolean;
 } & React.ComponentProps<typeof Sidebar>) {
   const { isMobile, setOpenMobile } = useSidebar();
   const navigate = (next: Page) => {
@@ -77,7 +79,7 @@ export function AppSidebar({
           <SidebarGroupLabel>工作台</SidebarGroupLabel>
           <SidebarGroupContent>
             <SidebarMenu>
-              {navigation.map(({ id, label, icon: Icon }) => (
+              {navigation.filter(item => admin || item.id === 'search' || item.id === 'sources').map(({ id, label, icon: Icon }) => (
                 <SidebarMenuItem key={id}>
                   <SidebarMenuButton
                     size="lg"

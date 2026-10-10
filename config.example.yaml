@@ -3,6 +3,22 @@ log_level: info
 server:
   address: 127.0.0.1:8787
 
+# Local mode only permits loopback listeners. See docs/authorization.md for OIDC.
+auth:
+  mode: local
+  # public_url: https://memory.example.com
+  session_ttl: 8h
+  token_ttl: 24h
+  # oidc:
+  #   issuer: https://identity.example.com/realms/work
+  #   client_id: ohyeah
+  #   client_secret: "" # Prefer OHYEAH_AUTH_OIDC_CLIENT_SECRET.
+  # principals:
+  #   - subject: "stable-oidc-subject"
+  #     admin: false
+  #     projects: [example]
+  #     sync_projects: []
+
 meilisearch:
   # managed: serve downloads and owns the local Meilisearch process.
   # external: connect to an independently managed instance.

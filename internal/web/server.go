@@ -8,6 +8,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"io/fs"
+	"log/slog"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -16,6 +17,7 @@ import (
 	"time"
 
 	"github.com/abandon1a2b/ohyeah/internal/app"
+	"github.com/abandon1a2b/ohyeah/internal/auth"
 	"github.com/abandon1a2b/ohyeah/internal/config"
 	"github.com/abandon1a2b/ohyeah/internal/distribution"
 	"github.com/abandon1a2b/ohyeah/internal/model"
@@ -47,9 +49,25 @@ func New(application *app.App) *fiber.App {
 			return c.Status(code).JSON(fiber.Map{"error": err.Error()})
 		},
 	})
+	if application.Auth != nil {
+		application.Auth.Register(server)
+	}
 	api := server.Group("/api/v1")
 	api.Get("/health", func(c *fiber.Ctx) error { return c.JSON(fiber.Map{"ok": true}) })
+	api.Use(func(c *fiber.Ctx) error {
+		if application.Config.Auth.Mode == "oidc" && (application.Auth == nil || !application.Auth.Enabled()) {
+			return fiber.ErrServiceUnavailable
+		}
+		if application.Auth == nil {
+			c.Locals("localAuth", true)
+			return c.Next()
+		}
+		return application.Auth.Authenticate(c)
+	})
 	api.Get("/status", func(c *fiber.Ctx) error {
+		if auth.Current(c) != nil && !auth.Current(c).Admin {
+			return c.JSON(fiber.Map{"backend": "available", "embeddingEnabled": application.Config.Meilisearch.Embedding.Enabled})
+		}
 		stats, err := application.Store.Stats(c.Context())
 		if err != nil {
 			return err
@@ -66,20 +84,45 @@ func New(application *app.App) *fiber.App {
 		if err != nil {
 			return err
 		}
-		return c.JSON(projects)
+		filtered := make([]model.Project, 0, len(projects))
+		for _, project := range projects {
+			if auth.Can(c, project.ID, "read") {
+				filtered = append(filtered, project)
+			}
+		}
+		return c.JSON(filtered)
 	})
 	api.Get("/sources", func(c *fiber.Ctx) error {
 		sources, err := application.Store.ListSources(c.Context(), false)
 		if err != nil {
 			return err
 		}
-		return c.JSON(sources)
+		filtered := make([]model.Source, 0, len(sources))
+		for _, source := range sources {
+			if auth.Can(c, source.ProjectID, "read") {
+				if p := auth.Current(c); p != nil && !p.Admin {
+					source.Options = nil
+					source.Cursor = nil
+				}
+				filtered = append(filtered, source)
+			}
+		}
+		return c.JSON(filtered)
 	})
 	api.Get("/sync/runs", func(c *fiber.Ctx) error {
+		if auth.Current(c) != nil && !auth.Current(c).Admin {
+			source, err := application.Store.GetSource(c.Context(), c.Query("source"))
+			if err != nil || !auth.Can(c, source.ProjectID, "read") {
+				return fiber.ErrNotFound
+			}
+		}
 		limit, _ := strconv.Atoi(c.Query("limit", "50"))
 		runs, err := application.Store.ListSyncRuns(c.Context(), c.Query("source"), limit)
 		if err != nil {
 			return err
+		}
+		if runs == nil {
+			runs = []model.SyncRun{}
 		}
 		return c.JSON(runs)
 	})
@@ -93,11 +136,24 @@ func New(application *app.App) *fiber.App {
 			}
 		}
 		if request.SourceID != "" {
+			source, err := application.Store.GetSource(c.Context(), request.SourceID)
+			if err != nil {
+				return err
+			}
+			if err := auth.Require(c, source.ProjectID, "sync"); err != nil {
+				return err
+			}
+			if p := auth.Current(c); p != nil {
+				slog.Info("sync requested", "subject", p.Subject, "source", source.ID)
+			}
 			run, err := application.Syncer.SyncByID(c.Context(), request.SourceID)
 			if err != nil {
 				return err
 			}
 			return c.JSON(run)
+		}
+		if err := auth.Require(c, "", "admin"); err != nil {
+			return err
 		}
 		runs, err := application.Syncer.SyncAll(c.Context())
 		if err != nil {
@@ -110,9 +166,18 @@ func New(application *app.App) *fiber.App {
 		if err != nil {
 			return err
 		}
+		if !auth.Can(c, record.Unit.ProjectID, "read") {
+			return fiber.ErrNotFound
+		}
 		return c.JSON(record)
 	})
 	api.Get("/search", func(c *fiber.Ctx) error {
+		if application.Config.Auth.Mode == "oidc" && c.Query("project") == "" {
+			return fiber.NewError(400, "project is required")
+		}
+		if err := auth.Require(c, c.Query("project"), "read"); err != nil {
+			return err
+		}
 		query := strings.TrimSpace(c.Query("q"))
 		if query == "" {
 			return fiber.NewError(fiber.StatusBadRequest, "q is required")
@@ -135,6 +200,9 @@ func New(application *app.App) *fiber.App {
 		return c.JSON(hits)
 	})
 	api.Get("/index/doctor", func(c *fiber.Ctx) error {
+		if err := auth.Require(c, "", "admin"); err != nil {
+			return err
+		}
 		result, err := application.Syncer.Doctor(c.Context())
 		if err != nil {
 			return err
@@ -142,6 +210,9 @@ func New(application *app.App) *fiber.App {
 		return c.JSON(result)
 	})
 	api.Post("/index/rebuild", func(c *fiber.Ctx) error {
+		if err := auth.Require(c, "", "admin"); err != nil {
+			return err
+		}
 		count, err := application.Syncer.RebuildIndex(c.Context())
 		if err != nil {
 			return err
@@ -150,6 +221,9 @@ func New(application *app.App) *fiber.App {
 	})
 
 	api.Get("/config", func(c *fiber.Ctx) error {
+		if err := auth.Require(c, "", "admin"); err != nil {
+			return err
+		}
 		raw, err := readConfig(application.Config.Path)
 		if err != nil {
 			return err
@@ -165,6 +239,9 @@ func New(application *app.App) *fiber.App {
 		return c.JSON(fiber.Map{"path": application.Config.Path, "raw": string(raw), "hash": contentHash(raw), "projects": cfg.Projects, "actions": changedActions(actions)})
 	})
 	api.Post("/config/validate", func(c *fiber.Ctx) error {
+		if err := auth.Require(c, "", "admin"); err != nil {
+			return err
+		}
 		var request configRequest
 		if err := c.BodyParser(&request); err != nil {
 			return fiber.NewError(fiber.StatusBadRequest, err.Error())
@@ -183,6 +260,9 @@ func New(application *app.App) *fiber.App {
 		return c.JSON(fiber.Map{"valid": true, "actions": changedActions(actions)})
 	})
 	api.Put("/config", func(c *fiber.Ctx) error {
+		if err := auth.Require(c, "", "admin"); err != nil {
+			return err
+		}
 		var request configRequest
 		if err := c.BodyParser(&request); err != nil {
 			return fiber.NewError(fiber.StatusBadRequest, err.Error())
@@ -220,13 +300,24 @@ func New(application *app.App) *fiber.App {
 		return c.JSON(fiber.Map{"saved": true, "hash": contentHash([]byte(request.Raw)), "actions": changedActions(applied)})
 	})
 
-	distribution.Register(server, application.Config.Server.Address)
+	publicURL := ""
+	if application.Config.Auth.Mode == "oidc" {
+		publicURL = application.Config.Auth.PublicURL
+	}
+	distribution.Register(server, application.Config.Server.Address, publicURL)
 	assets, _ := fs.Sub(embedded, "dist")
 	server.Use(filesystem.New(filesystem.Config{Root: http.FS(assets), Browse: false, Index: "index.html", NotFoundFile: "index.html"}))
 	return server
 }
 
 func Run(ctx context.Context, application *app.App, address string) error {
+	security, err := auth.New(ctx, application.Config, application.Store)
+	if err != nil {
+		return err
+	}
+	copy := *application
+	copy.Auth = security
+	application = &copy
 	server := New(application)
 	errs := make(chan error, 1)
 	go func() { errs <- server.Listen(address) }()

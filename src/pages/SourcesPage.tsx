@@ -17,11 +17,15 @@ export function SourcesPage({
   runs,
   busy,
   onSync,
+  canSyncAll = true,
+  canSync = () => true,
 }: {
   sources: Source[];
   runs: SyncRun[];
   busy: string;
   onSync: (id?: string) => void;
+  canSyncAll?: boolean;
+  canSync?: (source: Source) => boolean;
 }) {
   const latest = new Map<string, SyncRun>();
   for (const run of runs)
@@ -35,7 +39,7 @@ export function SourcesPage({
             已注册的数据挂载与最近同步状态
           </p>
         </div>
-        <Button disabled={!!busy} onClick={() => onSync()}>
+        {canSyncAll && <Button disabled={!!busy} onClick={() => onSync()}>
           {busy === "all" ? (
             <Spinner label="同步全部" />
           ) : (
@@ -44,7 +48,7 @@ export function SourcesPage({
               同步全部
             </>
           )}
-        </Button>
+        </Button>}
       </div>
       {sources.length === 0 ? (
         <Empty
@@ -78,7 +82,7 @@ export function SourcesPage({
                     <Button
                       size="sm"
                       variant="outline"
-                      disabled={!!busy || !source.enabled}
+                      disabled={!!busy || !source.enabled || !canSync(source)}
                       onClick={() => onSync(source.id)}
                     >
                       {busy === source.id ? <Spinner label="同步中" /> : "同步"}
@@ -150,7 +154,7 @@ export function SourcesPage({
                         <Button
                           size="sm"
                           variant="outline"
-                          disabled={!!busy || !source.enabled}
+                          disabled={!!busy || !source.enabled || !canSync(source)}
                           onClick={() => onSync(source.id)}
                         >
                           {busy === source.id ? (
