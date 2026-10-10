@@ -134,6 +134,9 @@ func relevantFile(path string, sources []model.Source) bool {
 }
 
 func watchEnabled(source model.Source) bool {
+	if source.Driver == model.DriverUpload {
+		return false
+	}
 	switch value := source.Options["watch"].(type) {
 	case bool:
 		return value

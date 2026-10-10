@@ -17,7 +17,7 @@ import (
 //go:embed assets
 var assets embed.FS
 
-const Version = "2"
+const Version = "3"
 
 type client struct{ file, run, requirement string }
 
@@ -135,7 +135,8 @@ Example:
 
     %s scripts/%s --server %s search "root cause verification" --project example --json
 
-Commands: projects, search, get, status, login, logout, whoami, tokens, revoke ID, sync SOURCE_ID. Run --help for options. Output is always JSON.
+Commands: projects, search, get, status, login, logout, whoami, tokens, revoke ID, sync SOURCE_ID, upload-state SOURCE_ID, prepare-upload SOURCE_ID, upload SOURCE_ID. Run --help for options. Output is always JSON.
+For remote collection, prepare-upload SOURCE_ID --file output.ndjson (or --collector EXEC --root PATH) emits a prepared batch. Save that JSON and upload SOURCE_ID --file batch.json. Retry the identical file after network failures; do not regenerate its batch ID. 202/indexPending means committed with indexing pending. 409 requires resolving a version/scope conflict against fresh source state.
 Exit codes: 0 success, 1 HTTP/transport error, 2 invalid arguments.
 Default request timeout: 10 seconds; override with --timeout SECONDS.
 OHYEAH_SERVER or --server overrides the packaged service URL. Central services use OIDC browser login and locally issued revocable API tokens. Run login (or login --no-browser), compare the CLI code with the browser page, and approve. No token is printed on login.

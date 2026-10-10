@@ -44,6 +44,9 @@ func (s *Service) SyncAll(ctx context.Context) ([]model.SyncRun, error) {
 	runs := make([]model.SyncRun, 0, len(sources))
 	var syncErrors []error
 	for _, registered := range sources {
+		if registered.Driver == model.DriverUpload {
+			continue
+		}
 		run, syncErr := s.SyncSource(ctx, registered)
 		runs = append(runs, run)
 		if syncErr != nil {
@@ -69,6 +72,9 @@ func (s *Service) SyncByID(ctx context.Context, id string) (model.SyncRun, error
 }
 
 func (s *Service) SyncSource(ctx context.Context, registered model.Source) (run model.SyncRun, resultErr error) {
+	if registered.Driver == model.DriverUpload {
+		return run, errors.New("upload sources accept batches; they cannot execute a collector")
+	}
 	lockValue, _ := s.locks.LoadOrStore(registered.ID, &sync.Mutex{})
 	lock := lockValue.(*sync.Mutex)
 	lock.Lock()
@@ -121,6 +127,9 @@ func (s *Service) PreviewAll(ctx context.Context) ([]model.SyncPreview, error) {
 	previews := make([]model.SyncPreview, 0, len(sources))
 	var previewErrors []error
 	for _, registered := range sources {
+		if registered.Driver == model.DriverUpload {
+			continue
+		}
 		preview, err := s.PreviewSource(ctx, registered)
 		if err != nil {
 			preview.Error = err.Error()

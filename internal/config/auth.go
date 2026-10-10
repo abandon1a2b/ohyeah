@@ -25,11 +25,13 @@ type OIDCConfig struct {
 }
 
 type PrincipalConfig struct {
-	Subject      string   `mapstructure:"subject"`
-	Name         string   `mapstructure:"name"`
-	Admin        bool     `mapstructure:"admin"`
-	Projects     []string `mapstructure:"projects"`
-	SyncProjects []string `mapstructure:"sync_projects"`
+	Subject       string   `mapstructure:"subject"`
+	Name          string   `mapstructure:"name"`
+	Admin         bool     `mapstructure:"admin"`
+	Projects      []string `mapstructure:"projects"`
+	SyncProjects  []string `mapstructure:"sync_projects"`
+	SyncSources   []string `mapstructure:"sync_sources" json:"syncSources"`
+	UploadSources []string `mapstructure:"upload_sources" json:"uploadSources"`
 }
 
 func SecureURL(raw string) bool {
@@ -76,6 +78,17 @@ func (c Config) ValidateAuth() error {
 		for _, project := range append(append([]string{}, p.Projects...), p.SyncProjects...) {
 			if !configIDPattern.MatchString(project) {
 				return fmt.Errorf("invalid auth project %q", project)
+			}
+		}
+		for _, source := range append(append([]string{}, p.SyncSources...), p.UploadSources...) {
+			parts := strings.Split(source, "/")
+			if len(parts) != 3 {
+				return fmt.Errorf("invalid source grant %q", source)
+			}
+			for _, part := range parts {
+				if !configIDPattern.MatchString(part) {
+					return fmt.Errorf("invalid source grant %q", source)
+				}
 			}
 		}
 	}

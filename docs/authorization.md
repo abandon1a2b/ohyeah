@@ -99,7 +99,7 @@ The health probe, authentication entry points, static assets and downloadable cl
 
 Administrators can issue a token for a configured service principal via `POST /auth/tokens` with JSON `{"subject":"service:collector","name":"collector-node-1"}`. Browser requests require the Origin and CSRF token returned by `/auth/me`; bearer-authenticated administration uses `Authorization: Bearer ...`. The response includes the raw token once. Set that token as `OHYEAH_TOKEN` for the service account. `DELETE /auth/tokens/<id>` revokes it immediately.
 
-Remote command execution is not exposed: synchronization invokes an already registered trusted collector. Changing collector commands requires administration. Local server collection remains supported. Uploading remote collector results, per-source write grants, idempotency and cursor concurrency control are the next protocol increment; this version does not pretend to provide a remote ingestion endpoint.
+Remote command execution is not exposed: synchronization invokes an already registered trusted collector. Changing collector commands requires administration. Central server collection and remote collector uploads are both supported. `sync_sources` grants individual collector triggers; `upload_sources` grants writes to exact upload mounts, additionally checked against their configured writer. See [Remote Collector Uploads](uploads.md) for batching, idempotency, cursor concurrency and deletion boundaries.
 
 ## Verification
 

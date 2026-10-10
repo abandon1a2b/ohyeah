@@ -48,13 +48,7 @@ func (c Command) Scan(ctx context.Context, source model.Source, maxFileSize int6
 	configureProcess(cmd)
 	cmd.Dir = source.Path
 	cmd.Env = append(os.Environ(), "OHYEAH_COLLECTOR_PROTOCOL=1")
-	request := collector.Request{
-		ProtocolVersion: collector.ProtocolVersion,
-		Project:         collector.Project{ID: source.ProjectID, Workspace: projectWorkspace(source)},
-		Type:            collector.DataType{ID: source.TypeID, Revision: source.TypeRevision},
-		Mount:           collector.Mount{ID: mountName(source), Root: source.Path, Revision: source.MountRevision, Options: publicOptions(source.Options)},
-		Cursor:          source.Cursor, MaxFileSize: maxFileSize,
-	}
+	request := CollectorRequest(source, maxFileSize)
 	input, err := json.Marshal(request)
 	if err != nil {
 		return model.ScanResult{}, err
@@ -76,20 +70,56 @@ func (c Command) Scan(ctx context.Context, source model.Source, maxFileSize int6
 			terminateProcess(cmd)
 		}
 	}()
+	result, err := ParseNDJSON(ctx, source, stdout)
+	if err != nil {
+		return model.ScanResult{}, err
+	}
+	if err := cmd.Wait(); err != nil {
+		waited = true
+		return model.ScanResult{}, fmt.Errorf("collector failed: %w: %s", err, stderr.String())
+	}
+	waited = true
+	return result, nil
+}
 
+func CollectorRequest(source model.Source, maxFileSize int64) collector.Request {
+	return collector.Request{
+		ProtocolVersion: collector.ProtocolVersion,
+		Project:         collector.Project{ID: source.ProjectID, Workspace: projectWorkspace(source)},
+		Type:            collector.DataType{ID: source.TypeID, Revision: source.TypeRevision},
+		Mount:           collector.Mount{ID: mountName(source), Root: source.Path, Revision: source.MountRevision, Options: publicOptions(source.Options)},
+		Cursor:          source.Cursor, MaxFileSize: maxFileSize,
+	}
+}
+
+func ParseNDJSON(ctx context.Context, source model.Source, input io.Reader) (model.ScanResult, error) {
+	var envelopes []collector.Envelope
+	scanner := bufio.NewScanner(input)
+	scanner.Buffer(make([]byte, 64*1024), 32<<20)
+	for scanner.Scan() {
+		if err := ctx.Err(); err != nil {
+			return model.ScanResult{}, err
+		}
+		var envelope collector.Envelope
+		if err := json.Unmarshal(scanner.Bytes(), &envelope); err != nil {
+			return model.ScanResult{}, fmt.Errorf("collector stdout line %d is not valid protocol JSON: %w", len(envelopes)+1, err)
+		}
+		envelopes = append(envelopes, envelope)
+	}
+	if err := scanner.Err(); err != nil {
+		return model.ScanResult{}, err
+	}
+	return ParseEnvelopes(ctx, source, envelopes)
+}
+
+func ParseEnvelopes(ctx context.Context, source model.Source, envelopes []collector.Envelope) (model.ScanResult, error) {
 	var collected []collector.Document
 	var deletedExternalIDs []string
 	var cursor json.RawMessage
 	completionMode := ""
-	scanner := bufio.NewScanner(stdout)
-	scanner.Buffer(make([]byte, 64*1024), 32<<20)
 	lineNumber := 0
-	for scanner.Scan() {
+	for _, envelope := range envelopes {
 		lineNumber++
-		var envelope collector.Envelope
-		if err := json.Unmarshal(scanner.Bytes(), &envelope); err != nil {
-			return model.ScanResult{}, fmt.Errorf("collector stdout line %d is not valid protocol JSON: %w", lineNumber, err)
-		}
 		switch envelope.Type {
 		case collector.EnvelopeDocument:
 			if completionMode != "" {
@@ -122,16 +152,20 @@ func (c Command) Scan(ctx context.Context, source model.Source, maxFileSize int6
 			return model.ScanResult{}, fmt.Errorf("collector stdout line %d has unknown envelope type %q", lineNumber, envelope.Type)
 		}
 	}
-	if err := scanner.Err(); err != nil {
-		return model.ScanResult{}, err
-	}
-	if err := cmd.Wait(); err != nil {
-		waited = true
-		return model.ScanResult{}, fmt.Errorf("collector failed: %w: %s", err, stderr.String())
-	}
-	waited = true
 	if completionMode == "" {
 		return model.ScanResult{}, errors.New("collector exited without a complete envelope; no changes were applied")
+	}
+	if completionMode == "snapshot" && len(deletedExternalIDs) > 0 {
+		return model.ScanResult{}, errors.New("snapshot cannot include explicit deletes")
+	}
+	deletedSet := map[string]bool{}
+	for _, id := range deletedExternalIDs {
+		deletedSet[id] = true
+	}
+	for _, document := range collected {
+		if deletedSet[document.ExternalID] {
+			return model.ScanResult{}, errors.New("batch cannot upsert and delete the same document")
+		}
 	}
 	documents, err := materializeCollected(source, collected)
 	if err != nil {
@@ -194,7 +228,6 @@ func materializeCollected(source model.Source, collected []collector.Document) (
 			ID: objectID, SourceID: source.ID, ExternalID: input.ExternalID,
 			ModifiedAt: modifiedAt.UTC(), ParserVersion: commandParserVersion, Reference: input.Reference,
 		}}
-		var hashes []string
 		for _, inputUnit := range input.Units {
 			occurredAt := inputUnit.OccurredAt
 			if occurredAt.IsZero() {
@@ -209,7 +242,6 @@ func materializeCollected(source model.Source, collected []collector.Document) (
 				kind = model.KindDocument
 			}
 			contentHash := identity.Hash(inputUnit.Content)
-			hashes = append(hashes, contentHash)
 			document.Units = append(document.Units, model.MemoryUnit{
 				ID: unitIDs[collectedRef(input.ExternalID, inputUnit.Key)], ObjectID: objectID,
 				ProjectID: source.ProjectID, TypeID: source.TypeID, MountID: source.ID,
@@ -220,7 +252,11 @@ func materializeCollected(source model.Source, collected []collector.Document) (
 				RequirementIDs: inputUnit.RequirementIDs, Repos: inputUnit.Repos, Entities: inputUnit.Entities, Metadata: inputUnit.Metadata,
 			})
 		}
-		document.Object.ContentHash = identity.Hash(strings.Join(hashes, ""))
+		encoded, err := json.Marshal(input)
+		if err != nil {
+			return nil, err
+		}
+		document.Object.ContentHash = identity.Hash(string(encoded))
 		for _, relation := range input.Relations {
 			fromExternalID := relation.FromExternalID
 			if fromExternalID == "" {

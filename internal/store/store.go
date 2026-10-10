@@ -75,11 +75,14 @@ func (s *Store) migrate(ctx context.Context) error {
 	if err := s.db.QueryRowContext(ctx, `PRAGMA user_version`).Scan(&version); err != nil {
 		return err
 	}
-	if version > 5 {
+	if version > 6 {
 		return fmt.Errorf("state database schema version %d is newer than this ohyeah binary", version)
 	}
-	if version == 5 {
+	if version == 6 {
 		return nil
+	}
+	if version == 5 {
+		return s.migrateCentral(ctx)
 	}
 	if version == 4 {
 		return s.migrateAuth(ctx)
@@ -596,6 +599,14 @@ func (s *Store) ReplaceDocument(ctx context.Context, doc model.Document) error {
 
 func (s *Store) ApplyScanResult(ctx context.Context, sourceID string, result model.ScanResult) (changed, deleted int, err error) {
 	err = s.withTx(ctx, func(tx *sql.Tx) error {
+		changed, deleted, err = applyScanResultTx(ctx, tx, sourceID, result)
+		return err
+	})
+	return
+}
+
+func applyScanResultTx(ctx context.Context, tx *sql.Tx, sourceID string, result model.ScanResult) (changed, deleted int, err error) {
+	err = func() error {
 		seen := make(map[string]struct{}, len(result.Documents))
 		for _, document := range result.Documents {
 			seen[document.Object.ExternalID] = struct{}{}
@@ -665,7 +676,7 @@ func (s *Store) ApplyScanResult(ctx context.Context, sourceID string, result mod
 			}
 		}
 		return nil
-	})
+	}()
 	return changed, deleted, err
 }
 

@@ -137,7 +137,7 @@ func newFixture(t *testing.T) *fixture {
 	f.cfg = config.Config{Server: config.ServerConfig{Address: strings.TrimPrefix(f.server.URL, "http://")}, Auth: config.AuthConfig{Mode: "oidc", PublicURL: f.server.URL, SessionTTL: time.Hour, TokenTTL: time.Hour, OIDC: config.OIDCConfig{Issuer: f.provider.URL, ClientID: "ohyeah-test"}, Principals: []config.PrincipalConfig{
 		{Subject: "alice", Name: "Alice", Projects: []string{"allowed"}},
 		{Subject: "admin", Admin: true},
-		{Subject: "robot", Projects: []string{"allowed"}, SyncProjects: []string{"allowed"}},
+		{Subject: "robot", Projects: []string{"allowed"}, SyncProjects: []string{"allowed"}, UploadSources: []string{"allowed/remote/node"}},
 	}}}
 	security, err := auth.New(context.Background(), f.cfg, f.state)
 	if err != nil {

@@ -27,7 +27,10 @@ PRAGMA user_version=5;`)
 	if err != nil {
 		return err
 	}
-	return tx.Commit()
+	if err := tx.Commit(); err != nil {
+		return err
+	}
+	return s.migrateCentral(ctx)
 }
 
 type Credential struct {

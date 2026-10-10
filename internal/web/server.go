@@ -1,12 +1,15 @@
 package web
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"database/sql"
 	"embed"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
+	"io"
 	"io/fs"
 	"log/slog"
 	"net/http"
@@ -22,6 +25,10 @@ import (
 	"github.com/abandon1a2b/ohyeah/internal/distribution"
 	"github.com/abandon1a2b/ohyeah/internal/model"
 	"github.com/abandon1a2b/ohyeah/internal/registry"
+	collectsource "github.com/abandon1a2b/ohyeah/internal/source"
+	"github.com/abandon1a2b/ohyeah/internal/store"
+	"github.com/abandon1a2b/ohyeah/internal/syncer"
+	"github.com/abandon1a2b/ohyeah/pkg/collector"
 	"github.com/gofiber/fiber/v2"
 	"github.com/gofiber/fiber/v2/middleware/filesystem"
 )
@@ -37,7 +44,7 @@ type configRequest struct {
 func New(application *app.App) *fiber.App {
 	server := fiber.New(fiber.Config{
 		DisableStartupMessage: true,
-		BodyLimit:             2 << 20,
+		BodyLimit:             32 << 20,
 		ErrorHandler: func(c *fiber.Ctx, err error) error {
 			code := fiber.StatusInternalServerError
 			var fiberErr *fiber.Error
@@ -55,6 +62,9 @@ func New(application *app.App) *fiber.App {
 	api := server.Group("/api/v1")
 	api.Get("/health", func(c *fiber.Ctx) error { return c.JSON(fiber.Map{"ok": true}) })
 	api.Use(func(c *fiber.Ctx) error {
+		if c.Path() != "/api/v1/uploads" && len(c.Body()) > 2<<20 {
+			return fiber.ErrRequestEntityTooLarge
+		}
 		if application.Config.Auth.Mode == "oidc" && (application.Auth == nil || !application.Auth.Enabled()) {
 			return fiber.ErrServiceUnavailable
 		}
@@ -136,12 +146,13 @@ func New(application *app.App) *fiber.App {
 			}
 		}
 		if request.SourceID != "" {
+			c.Locals("auditResource", request.SourceID)
 			source, err := application.Store.GetSource(c.Context(), request.SourceID)
 			if err != nil {
 				return err
 			}
-			if err := auth.Require(c, source.ProjectID, "sync"); err != nil {
-				return err
+			if !auth.CanSource(c, source, "sync") {
+				return fiber.ErrForbidden
 			}
 			if p := auth.Current(c); p != nil {
 				slog.Info("sync requested", "subject", p.Subject, "source", source.ID)
@@ -160,6 +171,67 @@ func New(application *app.App) *fiber.App {
 			return c.Status(fiber.StatusMultiStatus).JSON(fiber.Map{"runs": runs, "error": err.Error()})
 		}
 		return c.JSON(runs)
+	})
+	uploadSource := func(c *fiber.Ctx, id string) (model.Source, error) {
+		source, err := application.Store.GetSource(c.Context(), id)
+		if err != nil {
+			return source, err
+		}
+		subject, _, _ := auth.Actor(c)
+		writer, _ := source.Options["__ohyeah_writer"].(string)
+		if source.Driver != model.DriverUpload || !source.Enabled || source.State != model.SourceStateActive || !auth.CanSource(c, source, "upload") || writer != subject {
+			return source, fiber.ErrForbidden
+		}
+		return source, nil
+	}
+	api.Get("/uploads/state", func(c *fiber.Ctx) error {
+		source, err := uploadSource(c, c.Query("source"))
+		if err != nil {
+			return err
+		}
+		state, err := application.Store.UploadState(c.Context(), source)
+		if errors.Is(err, store.ErrUploadConflict) {
+			return fiber.NewError(409, err.Error())
+		}
+		if err != nil {
+			return err
+		}
+		source.Cursor = state.Cursor
+		return c.JSON(fiber.Map{"sourceId": state.SourceID, "version": state.Version, "scopeRevision": state.ScopeRevision, "cursor": state.Cursor, "request": collectsource.CollectorRequest(source, application.Config.Sync.MaxFileSize)})
+	})
+	api.Post("/uploads", func(c *fiber.Ctx) error {
+		var batch collector.UploadBatch
+		decoder := json.NewDecoder(bytes.NewReader(c.Body()))
+		decoder.DisallowUnknownFields()
+		if err := decoder.Decode(&batch); err != nil {
+			return fiber.NewError(400, "invalid upload JSON: "+err.Error())
+		}
+		if decoder.Decode(&struct{}{}) != io.EOF {
+			return fiber.NewError(400, "upload must contain exactly one JSON object")
+		}
+		source, err := uploadSource(c, batch.SourceID)
+		if err != nil {
+			return err
+		}
+		c.Locals("auditResource", source.ID)
+		subject, issuer, credential := auth.Actor(c)
+		receipt, err := application.Syncer.Upload(c.Context(), source, subject, issuer, credential, batch)
+		if errors.Is(err, store.ErrUploadConflict) {
+			return fiber.NewError(409, err.Error())
+		}
+		if errors.Is(err, store.ErrUploadSource) {
+			return fiber.ErrForbidden
+		}
+		if errors.Is(err, syncer.ErrInvalidUpload) {
+			return fiber.NewError(422, err.Error())
+		}
+		if err != nil {
+			return err
+		}
+		if receipt.IndexPending {
+			return c.Status(202).JSON(receipt)
+		}
+		return c.JSON(receipt)
 	})
 	api.Get("/memories/:id", func(c *fiber.Ctx) error {
 		record, err := application.Store.GetMemory(c.Context(), c.Params("id"))

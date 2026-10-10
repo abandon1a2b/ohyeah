@@ -282,6 +282,10 @@ python3 scripts/ohyeah.py logout
 
 两个客户端共享按服务地址隔离的凭据文件；无人值守账号可通过 `OHYEAH_TOKEN` 提供管理员签发的令牌。登录命令不会打印令牌。令牌过期后重新登录，当前没有自动刷新或 OIDC provider refresh token 存储。
 
+### 远程采集上传
+
+中央服务同时支持执行本机 command collector，以及接收客户端 collector 结果。上传来源使用 `collector.mode: upload`、明确的 `writer` 和 `upload_sources` 权限；周期同步不会执行上传来源。客户端提供 `upload-state`、`prepare-upload` 和 `upload`，提交支持固定批次 ID 重试、版本冲突检查、原子游标更新和来源内快照删除。配置与操作示例见 [Remote Collector Uploads](docs/uploads.md)。
+
 ### 验证
 
 ```bash

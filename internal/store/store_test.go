@@ -240,14 +240,14 @@ func TestMigrateVersionThreeAddsSyncRunIndex(t *testing.T) {
 	if err := state.db.QueryRow(`SELECT name FROM sqlite_master WHERE type='index' AND name='idx_sync_runs_source_id'`).Scan(&indexName); err != nil {
 		t.Fatal(err)
 	}
-	if version != 5 || indexName != "idx_sync_runs_source_id" {
+	if version != 6 || indexName != "idx_sync_runs_source_id" {
 		t.Fatalf("schema version=%d index=%q", version, indexName)
 	}
 	var recordedVersion int
 	if err := state.db.QueryRow(`SELECT version FROM schema_versions WHERE component='store'`).Scan(&recordedVersion); err != nil {
 		t.Fatal(err)
 	}
-	if recordedVersion != 5 {
+	if recordedVersion != 6 {
 		t.Fatalf("recorded schema version=%d", recordedVersion)
 	}
 }

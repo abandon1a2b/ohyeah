@@ -13,6 +13,8 @@ import tempfile
 import time
 import pathlib
 import webbrowser
+import uuid
+import subprocess
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -96,7 +98,7 @@ def execute(args, server):
         if data is not None:
             headers["Content-Type"] = "application/json"
         req = urllib.request.Request(server + endpoint, method=method, headers=headers,
-                                     data=json.dumps(data).encode() if data is not None else None)
+                                     data=json.dumps(data, ensure_ascii=False).encode() if data is not None else None)
         return fetch(req, args.timeout)
 
     if args.command == "login":
@@ -138,6 +140,34 @@ def execute(args, server):
         return request("/auth/tokens/" + urllib.parse.quote(args.value, safe=""), "DELETE")
     if args.command == "sync":
         return request("/api/v1/sync", "POST", {"sourceId": args.value})
+    if args.command in ("upload-state", "prepare-upload"):
+        code, state = request("/api/v1/uploads/state?" + urllib.parse.urlencode({"source": args.value}))
+        if code or args.command == "upload-state":
+            return code, state
+        if args.collector:
+            collector_request = state["request"]
+            root = args.root or collector_request["mount"]["root"]
+            collector_request["mount"]["root"] = root
+            if args.root:
+                collector_request["project"]["workspace"] = root
+            output = subprocess.run([args.collector] + json.loads(args.collector_args), input=json.dumps(collector_request),
+                                    text=True, capture_output=True, cwd=root, timeout=args.collector_timeout,
+                                    env={**os.environ, "OHYEAH_COLLECTOR_PROTOCOL": "1"})
+            if output.returncode:
+                return 1, {"error": "local collector failed; no batch prepared"}
+            text = output.stdout
+        else:
+            text = pathlib.Path(args.file).read_text()
+        if len(text.encode()) > 24 * 1024 * 1024:
+            return 1, {"error": "collector output exceeds 24 MiB; split into delta batches"}
+        envelopes = [json.loads(line) for line in text.splitlines() if line.strip()]
+        return 0, {"protocolVersion": 1, "sourceId": args.value, "batchId": str(uuid.uuid4()),
+                   "expectedVersion": state["version"], "scopeRevision": state["scopeRevision"], "envelopes": envelopes}
+    if args.command == "upload":
+        batch = json.loads(pathlib.Path(args.file).read_text())
+        if batch.get("sourceId") != args.value:
+            return 2, {"error": "batch sourceId does not match command source"}
+        return request("/api/v1/uploads", "POST", batch)
     if args.command == "search":
         params = {"q": args.value, "project": args.project, "limit": args.limit}
         for name in ("type", "mount", "workspace", "kind", "mode"):
@@ -154,7 +184,7 @@ def execute(args, server):
 
 def main():
     parser = Parser(description="Retrieve prior work context with provenance", allow_abbrev=False)
-    parser.add_argument("command", choices=["projects", "search", "get", "status", "login", "logout", "whoami", "tokens", "revoke", "sync"])
+    parser.add_argument("command", choices=["projects", "search", "get", "status", "login", "logout", "whoami", "tokens", "revoke", "sync", "upload-state", "prepare-upload", "upload"])
     parser.add_argument("value", nargs="?")
     parser.add_argument("--server", default=os.environ.get("OHYEAH_SERVER", DEFAULT_SERVER))
     parser.add_argument("--timeout", type=float, default=10)
@@ -167,6 +197,11 @@ def main():
     parser.add_argument("--kind", help="comma-separated memory kinds")
     parser.add_argument("--mode", choices=["keyword", "hybrid", "semantic"])
     parser.add_argument("--limit", type=int, default=10)
+    parser.add_argument("--file", help="NDJSON collector output for prepare-upload, prepared JSON batch for upload")
+    parser.add_argument("--collector", help="trusted local executable for prepare-upload; executed without a shell")
+    parser.add_argument("--collector-args", default="[]", help="JSON string array of local collector arguments")
+    parser.add_argument("--collector-timeout", type=float, default=300)
+    parser.add_argument("--root", help="absolute local collector working directory")
     args = parser.parse_intermixed_args()
     if not math.isfinite(args.timeout) or args.timeout <= 0 or args.timeout * 1000 > 2147483647:
         parser.error("--timeout must be a positive number of seconds (at most 2147483)")
@@ -179,7 +214,7 @@ def main():
         parser.error("--server must be an HTTP(S) URL without credentials, query or fragment")
     if args.no_browser and args.command != "login":
         parser.error("--no-browser is only valid for login")
-    if args.command in ("search", "get", "revoke", "sync"):
+    if args.command in ("search", "get", "revoke", "sync", "upload-state", "prepare-upload", "upload"):
         if not args.value or not args.value.strip():
             parser.error(args.command + " requires a nonempty argument")
     elif args.value is not None:
@@ -192,9 +227,27 @@ def main():
             parser.error("search requires --project")
         if args.limit <= 0 or args.limit > 2147483647:
             parser.error("--limit must be an integer between 1 and 2147483647")
+    if args.command == "prepare-upload" and bool(args.file) == bool(args.collector):
+        parser.error("prepare-upload requires exactly one of --file or --collector")
+    if args.command == "upload" and not args.file:
+        parser.error("upload requires --file with a prepared JSON batch")
+    if args.command not in ("prepare-upload", "upload") and args.file:
+        parser.error("--file is only valid for prepare-upload or upload")
+    if args.command != "prepare-upload" and (args.collector or args.root or args.collector_args != "[]" or args.collector_timeout != 300):
+        parser.error("collector options are only valid for prepare-upload")
+    try:
+        collector_args = json.loads(args.collector_args)
+        if not isinstance(collector_args, list) or not all(isinstance(v, str) for v in collector_args):
+            parser.error("--collector-args must be a JSON array of strings")
+    except ValueError:
+        parser.error("--collector-args must be a JSON array of strings")
+    if not math.isfinite(args.collector_timeout) or not 0 < args.collector_timeout <= 3600:
+        parser.error("--collector-timeout must be within 1 hour and positive")
+    if args.root and not pathlib.Path(args.root).is_absolute():
+        parser.error("--root must be absolute")
     try:
         code, result = execute(args, args.server.rstrip("/"))
-    except (OSError, ValueError, KeyError) as error:
+    except (OSError, ValueError, KeyError, subprocess.TimeoutExpired) as error:
         code, result = 1, {"error": str(error)}
     print(json.dumps(result, ensure_ascii=False, indent=2 if code == 0 else None),
           file=sys.stdout if code == 0 else sys.stderr)

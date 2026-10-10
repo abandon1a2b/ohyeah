@@ -7,6 +7,7 @@ import (
 
 const (
 	DriverCommand       = "command"
+	DriverUpload        = "upload"
 	ManagedByCLI        = "cli"
 	ManagedByConfig     = "config"
 	SourceStateActive   = "active"

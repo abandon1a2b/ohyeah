@@ -232,6 +232,9 @@ func buildDesiredState(cfg config.Config) desiredState {
 				Args    []string      `json:"args"`
 				Timeout time.Duration `json:"timeout"`
 			}{command, typeCfg.Collector.Args, typeCfg.Collector.Timeout})
+			if typeCfg.Collector.Mode == "upload" {
+				typeHash = hashJSON(typeCfg.Collector)
+			}
 			typeCanonicalID := projectID + "/" + typeID
 			state.types = append(state.types, model.DataType{
 				ID: typeCanonicalID, ProjectID: projectID, Name: typeID,
@@ -253,12 +256,18 @@ func buildDesiredState(cfg config.Config) desiredState {
 			Args    []string      `json:"args"`
 			Timeout time.Duration `json:"timeout"`
 		}{command, configured.Type.Collector.Args, configured.Type.Collector.Timeout})
+		if configured.Type.Collector.Mode == "upload" {
+			typeHash = hashJSON(configured.Type.Collector)
+		}
 		typeCanonicalID := configured.ProjectID + "/" + configured.TypeID
 		mountHash := hashJSON(struct {
 			Workspace string         `json:"workspace"`
 			Root      string         `json:"root"`
 			Options   map[string]any `json:"options"`
 		}{configured.Workspace, configured.Mount.Root, configured.Mount.Options})
+		if configured.Mount.Writer != "" {
+			mountHash = identity.Hash(mountHash, configured.Mount.Writer)
+		}
 		options := cloneOptions(configured.Mount.Options)
 		options["command"] = command
 		options["args"] = append([]string(nil), configured.Type.Collector.Args...)
@@ -267,11 +276,18 @@ func buildDesiredState(cfg config.Config) desiredState {
 			timeout = cfg.Sync.CollectorTimeout
 		}
 		options["__ohyeah_timeout"] = timeout.String()
+		driver := model.DriverCommand
+		if configured.Type.Collector.Mode == "upload" {
+			driver = model.DriverUpload
+			delete(options, "command")
+			delete(options, "args")
+			options["__ohyeah_writer"] = configured.Mount.Writer
+		}
 		mountCanonicalID := typeCanonicalID + "/" + configured.MountID
 		state.mounts = append(state.mounts, model.Source{
 			ID: mountCanonicalID, ProjectID: configured.ProjectID, ProjectWorkspace: configured.Workspace,
 			TypeID: configured.TypeID, MountName: configured.MountID,
-			WorkspaceID: configured.ProjectID, Driver: model.DriverCommand, Path: configured.Mount.Root,
+			WorkspaceID: configured.ProjectID, Driver: driver, Path: configured.Mount.Root,
 			Enabled: mountEnabled, ManagedBy: model.ManagedByConfig, State: enabledState(mountEnabled),
 			TypeConfigHash: typeHash, MountConfigHash: mountHash,
 			TypeRevision: configured.Type.Collector.Revision, MountRevision: configured.Mount.Revision,

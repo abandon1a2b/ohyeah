@@ -86,6 +86,7 @@ type DataTypeConfig struct {
 }
 
 type CollectorConfig struct {
+	Mode     string        `mapstructure:"mode"`
 	Command  string        `mapstructure:"command"`
 	Args     []string      `mapstructure:"args"`
 	Revision int           `mapstructure:"revision"`
@@ -93,6 +94,7 @@ type CollectorConfig struct {
 }
 
 type MountConfig struct {
+	Writer   string         `mapstructure:"writer"`
 	Enabled  *bool          `mapstructure:"enabled"`
 	Root     string         `mapstructure:"root"`
 	Revision int            `mapstructure:"revision"`
@@ -235,10 +237,20 @@ func (c Config) ValidateProjects() error {
 		if strings.TrimSpace(project.Workspace) == "" || !filepath.IsAbs(project.Workspace) {
 			return fmt.Errorf("project %q workspace must be an absolute path", projectID)
 		}
-		if info, err := os.Stat(project.Workspace); err != nil || !info.IsDir() {
+		needsLocal := false
+		for _, dataType := range project.Types {
+			if dataType.Collector.Mode != "upload" {
+				needsLocal = true
+			}
+		}
+		if info, err := os.Stat(project.Workspace); needsLocal && (err != nil || !info.IsDir()) {
 			return fmt.Errorf("project %q workspace is not a directory: %s", projectID, project.Workspace)
 		}
 		for typeID, dataType := range project.Types {
+			if dataType.Collector.Mode != "" && dataType.Collector.Mode != "command" && dataType.Collector.Mode != "upload" {
+				return fmt.Errorf("type %s/%s collector.mode must be command or upload", projectID, typeID)
+			}
+			upload := dataType.Collector.Mode == "upload"
 			typeEnabled := projectEnabled && enabled(dataType.Enabled)
 			if !configIDPattern.MatchString(typeID) {
 				return fmt.Errorf("type id %q in project %q must match %s", typeID, projectID, configIDPattern)
@@ -249,11 +261,14 @@ func (c Config) ValidateProjects() error {
 			if dataType.Collector.Timeout < 0 {
 				return fmt.Errorf("type %s/%s collector.timeout cannot be negative", projectID, typeID)
 			}
-			if strings.TrimSpace(dataType.Collector.Command) == "" {
+			if !upload && strings.TrimSpace(dataType.Collector.Command) == "" {
 				return fmt.Errorf("type %s/%s requires collector.command", projectID, typeID)
 			}
 			command := resolveCommand(project.Workspace, dataType.Collector.Command)
-			if typeEnabled {
+			if upload && (dataType.Collector.Command != "" || len(dataType.Collector.Args) > 0) {
+				return fmt.Errorf("upload type %s/%s cannot execute a command", projectID, typeID)
+			}
+			if typeEnabled && !upload {
 				if strings.ContainsRune(command, filepath.Separator) {
 					if info, err := os.Stat(command); err != nil || info.IsDir() || info.Mode()&0o111 == 0 {
 						return fmt.Errorf("type %s/%s collector.command is not executable: %s", projectID, typeID, command)
@@ -272,7 +287,13 @@ func (c Config) ValidateProjects() error {
 				if strings.TrimSpace(mount.Root) == "" || !filepath.IsAbs(mount.Root) {
 					return fmt.Errorf("mount %s/%s/%s root must be an absolute path", projectID, typeID, mountID)
 				}
-				if info, err := os.Stat(mount.Root); err != nil || !info.IsDir() {
+				if upload && strings.TrimSpace(mount.Writer) == "" {
+					return fmt.Errorf("upload mount %s/%s/%s requires writer subject", projectID, typeID, mountID)
+				}
+				if !upload && mount.Writer != "" {
+					return fmt.Errorf("command mount %s/%s/%s cannot declare upload writer", projectID, typeID, mountID)
+				}
+				if info, err := os.Stat(mount.Root); !upload && (err != nil || !info.IsDir()) {
 					return fmt.Errorf("mount %s/%s/%s root is not a directory: %s", projectID, typeID, mountID, mount.Root)
 				}
 				if _, reserved := mount.Options["command"]; reserved {
@@ -280,6 +301,11 @@ func (c Config) ValidateProjects() error {
 				}
 				if _, reserved := mount.Options["args"]; reserved {
 					return fmt.Errorf("mount %s/%s/%s options cannot contain reserved key args", projectID, typeID, mountID)
+				}
+				for key := range mount.Options {
+					if strings.HasPrefix(key, "__ohyeah_") {
+						return fmt.Errorf("mount options cannot contain reserved key %s", key)
+					}
 				}
 			}
 		}

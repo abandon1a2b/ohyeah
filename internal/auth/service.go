@@ -14,10 +14,12 @@ import (
 	"log/slog"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 	"time"
 
 	"github.com/abandon1a2b/ohyeah/internal/config"
+	"github.com/abandon1a2b/ohyeah/internal/model"
 	"github.com/abandon1a2b/ohyeah/internal/store"
 	"github.com/coreos/go-oidc/v3/oidc"
 	"github.com/gofiber/fiber/v2"
@@ -150,10 +152,34 @@ func Require(c *fiber.Ctx, project, action string) error {
 	return nil
 }
 
+func CanSource(c *fiber.Ctx, source model.Source, action string) bool {
+	if Can(c, source.ProjectID, action) {
+		return true
+	}
+	p := Current(c)
+	if p == nil {
+		return false
+	}
+	if action == "sync" {
+		return contains(p.SyncSources, source.ID)
+	}
+	if action == "upload" {
+		return contains(p.UploadSources, source.ID)
+	}
+	return false
+}
+
+func Actor(c *fiber.Ctx) (subject, issuer, credential string) {
+	if p := Current(c); p != nil {
+		return p.Subject, p.Credential.Issuer, p.Credential.ID
+	}
+	return "local", "local", ""
+}
+
 func (s *Service) Authenticate(c *fiber.Ctx) error {
 	if !s.Enabled() {
 		c.Locals("localAuth", true)
-		return c.Next()
+		return s.audited(c, "local", "local", "")
 	}
 	raw, kind := c.Cookies(sessionCookie), "session"
 	if authorization := c.Get("Authorization"); authorization != "" {
@@ -189,18 +215,36 @@ func (s *Service) Authenticate(c *fiber.Ctx) error {
 			return fiber.NewError(403, "invalid CSRF token or origin")
 		}
 	}
-	err = c.Next()
-	if c.Method() != "GET" && c.Method() != "HEAD" {
-		status := c.Response().StatusCode()
-		if err != nil {
-			status = 500
-			var failure *fiber.Error
-			if errors.As(err, &failure) {
-				status = failure.Code
-			}
-		}
-		slog.Info("authenticated action", "subject", p.Subject, "credential", credential.ID, "method", c.Method(), "path", c.Path(), "status", status)
+	return s.audited(c, p.Subject, credential.Issuer, credential.ID)
+}
+
+func (s *Service) audited(c *fiber.Ctx, subject, issuer, credential string) error {
+	if c.Method() == "GET" || c.Method() == "HEAD" || s.store == nil {
+		return c.Next()
 	}
+	id, err := s.store.StartAudit(c.Context(), store.AuditEvent{Issuer: issuer, Subject: subject, CredentialID: credential, Action: c.Method(), Resource: c.Path()})
+	if err != nil {
+		return fiber.NewError(503, "audit storage unavailable; action was not executed")
+	}
+	err = c.Next()
+	status := c.Response().StatusCode()
+	if err != nil {
+		status = 500
+		var failure *fiber.Error
+		if errors.As(err, &failure) {
+			status = failure.Code
+		}
+	}
+	resource := c.Path()
+	if value, ok := c.Locals("auditResource").(string); ok {
+		resource = value
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if finishErr := s.store.FinishAudit(ctx, id, status, resource); finishErr != nil {
+		slog.Error("audit finalization failed; durable pending record retained", "audit", id, "error", finishErr)
+	}
+	slog.Info("authenticated action", "audit", id, "subject", subject, "credential", credential, "method", c.Method(), "resource", resource, "status", status)
 	return err
 }
 
@@ -230,6 +274,26 @@ func (s *Service) Register(server *fiber.App) {
 	server.Get("/auth/cli", s.browserLogin, s.Authenticate, s.pairPage)
 	server.Post("/auth/cli/approve", s.Authenticate, s.approvePair)
 	server.Get("/auth/me", s.Authenticate, s.me)
+	server.Get("/auth/audit", s.Authenticate, func(c *fiber.Ctx) error {
+		p := Current(c)
+		all := c.Query("all") == "true"
+		if all && !p.Admin {
+			return fiber.ErrForbidden
+		}
+		before, err := strconv.ParseInt(c.Query("before", "0"), 10, 64)
+		if err != nil || before < 0 {
+			return fiber.ErrBadRequest
+		}
+		limit, err := strconv.Atoi(c.Query("limit", "50"))
+		if err != nil || limit < 1 || limit > 200 {
+			return fiber.ErrBadRequest
+		}
+		events, err := s.store.ListAudit(c.Context(), s.cfg.OIDC.Issuer, p.Subject, all, before, limit)
+		if err != nil {
+			return err
+		}
+		return c.JSON(events)
+	})
 	server.Post("/auth/logout", s.Authenticate, func(c *fiber.Ctx) error {
 		p := Current(c)
 		if err := s.store.RevokeCredential(c.Context(), p.Credential.ID, p.Subject, s.cfg.OIDC.Issuer, false); err != nil {
@@ -275,7 +339,7 @@ func (s *Service) Register(server *fiber.App) {
 
 func (s *Service) me(c *fiber.Ctx) error {
 	p := Current(c)
-	result := fiber.Map{"subject": p.Subject, "name": p.Name, "admin": p.Admin, "projects": p.Projects, "syncProjects": p.SyncProjects, "credential": p.Credential}
+	result := fiber.Map{"subject": p.Subject, "name": p.Name, "admin": p.Admin, "projects": p.Projects, "syncProjects": p.SyncProjects, "syncSources": p.SyncSources, "uploadSources": p.UploadSources, "credential": p.Credential}
 	if p.Credential.Kind == "session" {
 		result["csrf"] = hash("csrf:" + c.Cookies(sessionCookie))
 	}
