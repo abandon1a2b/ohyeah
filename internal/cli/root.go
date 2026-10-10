@@ -17,6 +17,7 @@ import (
 
 	"github.com/abandon1a2b/ohyeah/internal/app"
 	"github.com/abandon1a2b/ohyeah/internal/config"
+	"github.com/abandon1a2b/ohyeah/internal/managed"
 	"github.com/abandon1a2b/ohyeah/internal/model"
 	"github.com/abandon1a2b/ohyeah/internal/registry"
 	"github.com/abandon1a2b/ohyeah/internal/source"
@@ -536,16 +537,43 @@ func newServeCommand(opts *options) *cobra.Command {
 				return err
 			}
 			defer application.Close()
-			if _, err := registry.New(application.Store, application.Config).Apply(cmd.Context()); err != nil {
-				return err
-			}
 			ctx, cancel := signal.NotifyContext(cmd.Context(), os.Interrupt, syscall.SIGTERM)
 			defer cancel()
+			var engine *managed.Process
+			if application.Config.Meilisearch.Mode == "managed" {
+				engine, err = managed.Start(ctx, application.Config.Meilisearch)
+				if err != nil {
+					return err
+				}
+				defer engine.Close()
+				if err := application.Ensure(ctx); err != nil {
+					return err
+				}
+				doctor, err := application.Syncer.Doctor(ctx)
+				if err != nil {
+					return err
+				}
+				if !doctor.Consistent {
+					if _, err := application.Syncer.RebuildIndex(ctx); err != nil {
+						return err
+					}
+				}
+			}
+			if _, err := registry.New(application.Store, application.Config).Apply(ctx); err != nil {
+				return err
+			}
 			sources, err := application.Store.ListSources(ctx, true)
 			if err != nil {
 				return err
 			}
-			errCh := make(chan error, 4)
+			workers := 4
+			if engine != nil {
+				workers++
+			}
+			errCh := make(chan error, workers)
+			if engine != nil {
+				go func() { errCh <- engine.Wait(ctx) }()
+			}
 			go func() { errCh <- application.Syncer.RunPeriodic(ctx) }()
 			go func() {
 				errCh <- syncer.WatchDynamic(ctx, func(listCtx context.Context) ([]model.Source, error) {
@@ -568,7 +596,12 @@ func newServeCommand(opts *options) *cobra.Command {
 			go func() { errCh <- web.Run(ctx, application, application.Config.Server.Address) }()
 			slog.Info("ohyeah service started", "sources", len(sources), "web", "http://"+application.Config.Server.Address)
 			err = <-errCh
-			if err != nil && err != context.Canceled {
+			interrupted := ctx.Err() != nil
+			cancel()
+			for i := 1; i < workers; i++ {
+				<-errCh
+			}
+			if !interrupted && err != nil && err != context.Canceled {
 				return err
 			}
 			return nil

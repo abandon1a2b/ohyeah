@@ -3,11 +3,14 @@ package config
 import (
 	"errors"
 	"fmt"
+	"net"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -30,11 +33,26 @@ type ServerConfig struct {
 }
 
 type MeilisearchConfig struct {
+	Mode      string          `mapstructure:"mode"`
+	Directory string          `mapstructure:"directory"`
 	URL       string          `mapstructure:"url"`
 	APIKey    string          `mapstructure:"api_key"`
 	Index     string          `mapstructure:"index"`
 	BatchSize int             `mapstructure:"batch_size"`
 	Embedding EmbeddingConfig `mapstructure:"embedding"`
+}
+
+func (c MeilisearchConfig) ManagedAddress() (string, error) {
+	u, err := url.Parse(c.URL)
+	if err != nil {
+		return "", err
+	}
+	ip := net.ParseIP(u.Hostname())
+	port, portErr := strconv.Atoi(u.Port())
+	if u.Scheme != "http" || ip == nil || !ip.IsLoopback() || portErr != nil || port < 1 || port > 65535 || u.User != nil || u.RawQuery != "" || u.Fragment != "" || (u.Path != "" && u.Path != "/") {
+		return "", errors.New("managed Meilisearch url must be an HTTP loopback IP with an explicit port")
+	}
+	return u.Host, nil
 }
 
 type EmbeddingConfig struct {
@@ -105,6 +123,8 @@ func Load(path string) (Config, error) {
 	v.SetDefault("state_path", filepath.Join(dataDir, "state.db"))
 	v.SetDefault("log_level", "info")
 	v.SetDefault("meilisearch.url", "http://127.0.0.1:7700")
+	v.SetDefault("meilisearch.mode", "managed")
+	v.SetDefault("meilisearch.directory", filepath.Join(dataDir, "meilisearch"))
 	v.SetDefault("meilisearch.api_key", "")
 	v.SetDefault("meilisearch.index", "ohyeah_memory_v1")
 	v.SetDefault("meilisearch.batch_size", 100)
@@ -143,6 +163,23 @@ func Load(path string) (Config, error) {
 	var cfg Config
 	if err := v.Unmarshal(&cfg); err != nil {
 		return Config{}, err
+	}
+	// Configurations written before managed mode explicitly selected an endpoint.
+	_, envURL := os.LookupEnv("OHYEAH_MEILISEARCH_URL")
+	_, envMode := os.LookupEnv("OHYEAH_MEILISEARCH_MODE")
+	if !v.InConfig("meilisearch.mode") && !envMode && (v.InConfig("meilisearch.url") || envURL) {
+		cfg.Meilisearch.Mode = "external"
+	}
+	if cfg.Meilisearch.Mode != "managed" && cfg.Meilisearch.Mode != "external" {
+		return Config{}, errors.New("meilisearch.mode must be managed or external")
+	}
+	if cfg.Meilisearch.Mode == "managed" && !filepath.IsAbs(cfg.Meilisearch.Directory) {
+		return Config{}, errors.New("meilisearch.directory must be an absolute path")
+	}
+	if cfg.Meilisearch.Mode == "managed" {
+		if _, err := cfg.Meilisearch.ManagedAddress(); err != nil {
+			return Config{}, err
+		}
 	}
 	cfg.HasProjectConfig = v.IsSet("projects")
 	cfg.Path = v.ConfigFileUsed()

@@ -5,6 +5,7 @@ go 1.27
 require (
 	github.com/fsnotify/fsnotify v1.10.1
 	github.com/gofiber/fiber/v2 v2.52.15
+	github.com/gofrs/flock v0.12.1
 	github.com/meilisearch/meilisearch-go v0.36.3
 	github.com/spf13/cobra v1.10.2
 	github.com/spf13/viper v1.21.0

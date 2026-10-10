@@ -86,7 +86,28 @@ make build
 
 Web UI 使用 shadcn/ui 的 Nova 风格组件和 `dashboard-01` 模板布局。组件源码位于 `src/components/ui`，主题变量在 `src/styles.css`，通过 `npx shadcn@latest add <component>` 按需添加组件。修改页面后运行 `make build`，让 `./ohyeah serve` 使用最新嵌入式资源。
 
-初始化本地状态库和 Meilisearch 索引：
+第一次使用时，直接启动完整服务：
+
+```bash
+./ohyeah serve
+```
+
+没有显式配置 Meilisearch 地址时，默认采用 `managed` 模式：首次运行会下载固定版本的官方二进制并校验 SHA-256，保存随机主密钥，启动本地子进程，等待健康检查并初始化索引。正常退出会停止子进程；异常退出后，操作系统会释放服务锁。如果遗留进程仍占用端口，下一次启动会明确报告端口冲突。
+
+Meilisearch 仅监听 loopback 地址，默认 `http://127.0.0.1:7700`。二进制、密钥、日志和版本独立的数据目录默认保存在用户配置目录下的 `ohyeah/meilisearch`；可通过 `meilisearch.directory` 设置绝对路径。日志位于该目录的 `meilisearch.log`。目前固定版本为 `v1.54.3`，支持 macOS/Linux amd64、arm64 和 Windows amd64；Linux 官方二进制要求 glibc 2.35+。下载和运行不依赖 Docker 或 sudo，不自动升级版本。首次下载需要访问 GitHub Releases。
+
+已有配置显式设置 `meilisearch.url` 且未指定 `mode` 时，保留旧行为，使用外部实例。要切换为服务管理的实例，请明确设置：
+
+```yaml
+meilisearch:
+  mode: managed
+  url: http://127.0.0.1:7700
+  api_key: ""  # 自动生成并持久化；不需要在配置文件中保存密钥
+```
+
+外部实例则使用 `mode: external`，并配置 `url` 和 `api_key`。managed 模式不会接管已有进程：端口被占用或同一数据目录已有 `serve` 时，会拒绝启动。启动时发现主索引数量与 SQLite 不一致，会从 SQLite 重建索引。不同版本使用独立的 Meilisearch 数据目录；可选向量索引需重新运行 `index vectors`。修改进程配置后需要重启 `serve`。
+
+本地 CLI 仍可直接操作状态库和索引。Meilisearch 已运行后，可以显式初始化：
 
 ```bash
 ./ohyeah init
@@ -172,6 +193,7 @@ projects:
 - 动态文件系统 watcher
 - 配置文件 watcher 与自动 apply
 - Meilisearch outbox 投递
+- managed 模式下的 Meilisearch 下载、校验和进程管理
 
 ```bash
 ./ohyeah --config /path/to/config.yaml serve
@@ -224,6 +246,50 @@ CLI 可通过 `--mode hybrid|semantic` 主动使用向量；Web UI 搜索页也�
 ## Codex Skill
 
 仓库根目录同时也是一个 Codex skill。[SKILL.md](SKILL.md) 保持精简：CLI 负责操作细节和结构化输出，skill 只规定路由、provenance 和时效性边界。
+
+### HTTP 客户端与 Skill 下载
+
+`serve` 同时提供 Python 和 Node.js 两种轻量 HTTP 客户端，无第三方依赖，不分发 Go 客户端。它们通过 `/api/v1` 访问服务，不打开本地 SQLite，也不直接访问 Meilisearch。
+
+- [Python 下载包](http://127.0.0.1:8787/downloads/python.zip)：Python 3.9+。
+- [Node.js 下载包](http://127.0.0.1:8787/downloads/node.zip)：Node.js 18+，使用内置 fetch。
+- [下载清单](http://127.0.0.1:8787/downloads)：版本、运行时要求和各文件地址。
+
+每个 ZIP 包包含 `ohyeah/SKILL.md`、`ohyeah/README.md` 和 `ohyeah/scripts/` 下的客户端。将整个 `ohyeah` 目录放到 Agent 的 skill 目录即可，也可以直接运行脚本。两个包是同一 Skill 的可选实现，选择符合当前环境的一种安装。单文件地址分别为 `/downloads/python/ohyeah.py`、`/downloads/node/ohyeah.mjs`；配套 Skill 地址为 `/downloads/python/SKILL.md` 和 `/downloads/node/SKILL.md`。
+
+```bash
+python3 scripts/ohyeah.py projects --json
+python3 scripts/ohyeah.py search "缓存 失效 最终结论" --project example --json
+node scripts/ohyeah.mjs get <memory-id> --json
+node scripts/ohyeah.mjs status --json
+```
+
+下载脚本的默认地址来自服务配置；`--server URL` 或环境变量 `OHYEAH_SERVER` 可覆盖地址，命令行优先。跨机器访问时必须设置客户端可达的地址。服务绑定 `0.0.0.0` 或 `::` 时，下载包默认仍指向 loopback，不会从不受信任的请求 Host 推断地址。
+
+两种客户端都提供 `projects`、`search`、`get`、`status`，始终输出 JSON，支持 `--help`、`--json` 和 `--timeout`（默认 10 秒）。`search` 要求 `--project`，支持 `--type`、`--mount`、`--workspace`、`--kind`、`--mode` 和 `--limit`。退出码统一为：0 成功，1 HTTP/网络错误，2 参数错误；错误 JSON 写到 stderr。
+
+当前 HTTP API 没有内置鉴权，默认保持本地访问。远程使用应通过有鉴权的私有隧道或反向代理接入；客户端 Skill 下载并不改变配置写入和索引管理 API 的访问权限。
+
+### 验证
+
+```bash
+go test -race ./...
+go vet ./...
+npm run check
+```
+
+客户端契约测试会实际执行 Python 和 Node.js 脚本，包含中文与特殊字符编码、参数校验、错误响应、截断响应、慢速流式响应和总请求超时。相应运行时缺失时该客户端测试会跳过。Meilisearch 管理测试覆盖下载校验、断点续传、服务器忽略 Range、失败清理、并发密钥生成和进程生命周期。
+
+macOS arm64 上可使用已经下载的固定版本社区版 Meilisearch，运行真实服务集成测试（全部数据放在独立临时目录）：
+
+```bash
+go build -o ohyeah .
+OHYEAH_TEST_MEILISEARCH=/absolute/path/to/meilisearch-v1.54.3 \
+OHYEAH_TEST_BINARY="$PWD/ohyeah" \
+go test ./internal/cli -run TestRealServiceLifecycle -v -count=1
+```
+
+该测试实际启动服务和 Meilisearch，通过 collector 采集记录，验证搜索、项目隔离、provenance、两种下载客户端、更新、采集失败保留数据、快照删除、SQLite 重建索引、正常退出与子进程异常退出。默认测试不执行网络下载，也不修改已有实例。
 
 ## 当前状态
 

@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	"github.com/abandon1a2b/ohyeah/internal/config"
+	"github.com/abandon1a2b/ohyeah/internal/managed"
 	"github.com/abandon1a2b/ohyeah/internal/search"
 	"github.com/abandon1a2b/ohyeah/internal/store"
 	"github.com/abandon1a2b/ohyeah/internal/syncer"
@@ -24,6 +25,9 @@ func Open(configPath string) (*App, error) {
 	}
 	if err := config.EnsureDirectories(cfg); err != nil {
 		return nil, fmt.Errorf("create state directory: %w", err)
+	}
+	if err := managed.Resolve(&cfg.Meilisearch); err != nil {
+		return nil, fmt.Errorf("prepare managed Meilisearch: %w", err)
 	}
 	state, err := store.Open(cfg.StatePath)
 	if err != nil {

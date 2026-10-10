@@ -4,6 +4,10 @@ server:
   address: 127.0.0.1:8787
 
 meilisearch:
+  # managed: serve downloads and owns the local Meilisearch process.
+  # external: connect to an independently managed instance.
+  mode: managed
+  # directory: /absolute/path/to/ohyeah/meilisearch
   url: http://127.0.0.1:7700
   api_key: ""
   index: ohyeah_memory_v1

@@ -13,9 +13,11 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/abandon1a2b/ohyeah/internal/app"
 	"github.com/abandon1a2b/ohyeah/internal/config"
+	"github.com/abandon1a2b/ohyeah/internal/distribution"
 	"github.com/abandon1a2b/ohyeah/internal/model"
 	"github.com/abandon1a2b/ohyeah/internal/registry"
 	"github.com/gofiber/fiber/v2"
@@ -218,6 +220,7 @@ func New(application *app.App) *fiber.App {
 		return c.JSON(fiber.Map{"saved": true, "hash": contentHash([]byte(request.Raw)), "actions": changedActions(applied)})
 	})
 
+	distribution.Register(server, application.Config.Server.Address)
 	assets, _ := fs.Sub(embedded, "dist")
 	server.Use(filesystem.New(filesystem.Config{Root: http.FS(assets), Browse: false, Index: "index.html", NotFoundFile: "index.html"}))
 	return server
@@ -229,7 +232,7 @@ func Run(ctx context.Context, application *app.App, address string) error {
 	go func() { errs <- server.Listen(address) }()
 	select {
 	case <-ctx.Done():
-		if err := server.Shutdown(); err != nil {
+		if err := server.ShutdownWithTimeout(5 * time.Second); err != nil {
 			return err
 		}
 		return ctx.Err()

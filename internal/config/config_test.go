@@ -81,3 +81,56 @@ func TestEmbeddingConfiguration(t *testing.T) {
 		})
 	}
 }
+
+func TestMeilisearchModeCompatibility(t *testing.T) {
+	for _, tc := range []struct{ raw, want string }{
+		{"", "managed"},
+		{"meilisearch:\n  url: http://127.0.0.1:7700\n", "external"},
+		{"meilisearch:\n  mode: managed\n  url: http://127.0.0.1:7700\n", "managed"},
+		{"meilisearch:\n  mode: external\n", "external"},
+	} {
+		path := filepath.Join(t.TempDir(), "config.yaml")
+		if err := os.WriteFile(path, []byte(tc.raw), 0600); err != nil {
+			t.Fatal(err)
+		}
+		cfg, err := Load(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if cfg.Meilisearch.Mode != tc.want {
+			t.Fatalf("%q: got %s want %s", tc.raw, cfg.Meilisearch.Mode, tc.want)
+		}
+	}
+}
+
+func TestInvalidManagedConfiguration(t *testing.T) {
+	for _, raw := range []string{
+		"meilisearch:\n  mode: invalid\n",
+		"meilisearch:\n  mode: managed\n  directory: relative/path\n",
+		"meilisearch:\n  mode: managed\n  url: http://0.0.0.0:7700\n",
+	} {
+		path := filepath.Join(t.TempDir(), "config.yaml")
+		if err := os.WriteFile(path, []byte(raw), 0600); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := Load(path); err == nil {
+			t.Fatalf("accepted %q", raw)
+		}
+	}
+}
+
+func TestMeilisearchEnvironmentOverrides(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	if err := os.WriteFile(path, []byte("meilisearch:\n  url: http://127.0.0.1:7700\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("OHYEAH_MEILISEARCH_MODE", "managed")
+	t.Setenv("OHYEAH_MEILISEARCH_URL", "http://127.0.0.1:7799")
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Meilisearch.Mode != "managed" || cfg.Meilisearch.URL != "http://127.0.0.1:7799" {
+		t.Fatalf("overrides: %#v", cfg.Meilisearch)
+	}
+}
