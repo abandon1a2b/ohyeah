@@ -30,7 +30,10 @@ PRAGMA user_version=6;`)
 	if err != nil {
 		return err
 	}
-	return tx.Commit()
+	if err := tx.Commit(); err != nil {
+		return err
+	}
+	return s.migrateIdentity(ctx)
 }
 
 var ErrUploadConflict = errors.New("upload version, scope, or batch ID conflict; prepare a new batch from current source state")

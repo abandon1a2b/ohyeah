@@ -75,3 +75,18 @@ func TestMissingIdentityDeniesPermissions(t *testing.T) {
 	}
 	response.Body.Close()
 }
+
+func TestHTTPSCookiesUseHostPrefix(t *testing.T) {
+	s := &Service{cfg: config.AuthConfig{PublicURL: "https://memory.example.com"}}
+	server := fiber.New()
+	server.Get("/", func(c *fiber.Ctx) error { s.cookie(c, sessionCookie, "test", time.Hour); return c.SendStatus(200) })
+	response, err := server.Test(httptest.NewRequest("GET", "/", nil))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer response.Body.Close()
+	cookies := response.Cookies()
+	if len(cookies) != 1 || cookies[0].Name != "__Host-ohyeah_session" || !cookies[0].Secure || !cookies[0].HttpOnly || cookies[0].Domain != "" || cookies[0].Path != "/" {
+		t.Fatalf("unsafe session cookie: %#v", cookies)
+	}
+}

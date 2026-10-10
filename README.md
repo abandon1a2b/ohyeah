@@ -286,6 +286,8 @@ python3 scripts/ohyeah.py logout
 
 中央服务同时支持执行本机 command collector，以及接收客户端 collector 结果。上传来源使用 `collector.mode: upload`、明确的 `writer` 和 `upload_sources` 权限；周期同步不会执行上传来源。客户端提供 `upload-state`、`prepare-upload` 和 `upload`，提交支持固定批次 ID 重试、版本冲突检查、原子游标更新和来源内快照删除。配置与操作示例见 [Remote Collector Uploads](docs/uploads.md)。
 
+OIDC 模式下，Web UI 的“访问管理”提供账号权限在线编辑、凭据签发/轮换/撤销和持久化审计查询。权限变更立即影响已有令牌。来源页支持上传准备好的 JSON 批次，配置页可选择中央执行或远程上传。没有现成 SSO 时，可用 [本地 Keycloak 中央服务示例](deploy/oidc-demo/README.md) 试用完整登录流程；它是开发示例，不是生产部署。
+
 ### 验证
 
 ```bash

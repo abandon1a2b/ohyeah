@@ -247,7 +247,9 @@ def main():
         parser.error("--root must be absolute")
     try:
         code, result = execute(args, args.server.rstrip("/"))
-    except (OSError, ValueError, KeyError, subprocess.TimeoutExpired) as error:
+    except subprocess.TimeoutExpired:
+        code, result = 1, {"error": "local collector timed out; no batch prepared"}
+    except (OSError, ValueError, KeyError) as error:
         code, result = 1, {"error": str(error)}
     print(json.dumps(result, ensure_ascii=False, indent=2 if code == 0 else None),
           file=sys.stdout if code == 0 else sys.stderr)

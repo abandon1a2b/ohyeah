@@ -167,8 +167,8 @@ async function main() {
           const root=options.root??state.request.mount.root;
           state.request.mount.root=root;if(options.root)state.request.project.workspace=root;
           const promise=promisify(execFile)(options.collector,collectorArgs,{cwd:root,timeout:collectorTimeout*1000,maxBuffer:24*1024*1024,env:{...process.env,OHYEAH_COLLECTOR_PROTOCOL:'1'}});
-          promise.child.stdin.end(JSON.stringify(state.request));
-          text=(await promise).stdout;
+          promise.child.stdin?.end(JSON.stringify(state.request));
+          try { text=(await promise).stdout; } catch { throw new Error('local collector failed or timed out; no batch prepared'); }
         }else text=await readFile(options.file,'utf8');
         if(Buffer.byteLength(text)>24*1024*1024)throw new Error('collector output exceeds 24 MiB; split into delta batches');
         const envelopes=text.split(/\r?\n/).filter(line=>line.trim()).map(line=>JSON.parse(line));

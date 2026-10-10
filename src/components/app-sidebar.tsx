@@ -4,6 +4,7 @@ import {
   LayoutDashboard,
   Search,
   Settings2,
+  ShieldCheck,
 } from "lucide-react";
 import { Separator } from "@/components/ui/separator";
 import {
@@ -27,6 +28,7 @@ export const navigation = [
   { id: "sources", label: "数据与同步", icon: BookOpen },
   { id: "config", label: "配置管理", icon: Settings2 },
   { id: "index", label: "索引管理", icon: Database },
+  { id: "access", label: "访问管理", icon: ShieldCheck },
 ] as const;
 
 export type Page = (typeof navigation)[number]["id"];
@@ -36,12 +38,14 @@ export function AppSidebar({
   backendAvailable,
   onNavigate,
   admin = true,
+  authenticated = false,
   ...props
 }: {
   page: Page;
   backendAvailable: boolean;
   onNavigate: (page: Page) => void;
   admin?: boolean;
+  authenticated?: boolean;
 } & React.ComponentProps<typeof Sidebar>) {
   const { isMobile, setOpenMobile } = useSidebar();
   const navigate = (next: Page) => {
@@ -79,21 +83,27 @@ export function AppSidebar({
           <SidebarGroupLabel>工作台</SidebarGroupLabel>
           <SidebarGroupContent>
             <SidebarMenu>
-              {navigation.filter(item => admin || item.id === 'search' || item.id === 'sources').map(({ id, label, icon: Icon }) => (
-                <SidebarMenuItem key={id}>
-                  <SidebarMenuButton
-                    size="lg"
-                    type="button"
-                    isActive={page === id}
-                    tooltip={label}
-                    aria-current={page === id ? "page" : undefined}
-                    onClick={() => navigate(id)}
-                  >
-                    <Icon />
-                    <span>{label}</span>
-                  </SidebarMenuButton>
-                </SidebarMenuItem>
-              ))}
+              {navigation
+                .filter((item) =>
+                  item.id === "access"
+                    ? authenticated
+                    : admin || item.id === "search" || item.id === "sources",
+                )
+                .map(({ id, label, icon: Icon }) => (
+                  <SidebarMenuItem key={id}>
+                    <SidebarMenuButton
+                      size="lg"
+                      type="button"
+                      isActive={page === id}
+                      tooltip={label}
+                      aria-current={page === id ? "page" : undefined}
+                      onClick={() => navigate(id)}
+                    >
+                      <Icon />
+                      <span>{label}</span>
+                    </SidebarMenuButton>
+                  </SidebarMenuItem>
+                ))}
             </SidebarMenu>
           </SidebarGroupContent>
         </SidebarGroup>

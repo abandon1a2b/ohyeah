@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"time"
 )
@@ -34,28 +35,35 @@ PRAGMA user_version=5;`)
 }
 
 type Credential struct {
-	ID        string `json:"id"`
-	Subject   string `json:"subject"`
-	Issuer    string `json:"issuer"`
-	Kind      string `json:"kind"`
-	Name      string `json:"name"`
-	ExpiresAt int64  `json:"expiresAt"`
-	CreatedAt int64  `json:"createdAt"`
+	ID         string `json:"id"`
+	Subject    string `json:"subject"`
+	Issuer     string `json:"issuer"`
+	Kind       string `json:"kind"`
+	Name       string `json:"name"`
+	ExpiresAt  int64  `json:"expiresAt"`
+	CreatedAt  int64  `json:"createdAt"`
+	LastUsedAt int64  `json:"lastUsedAt"`
 }
 
 func (s *Store) CreateCredential(ctx context.Context, c Credential, hash string) error {
-	_, err := s.db.ExecContext(ctx, `INSERT INTO auth_credentials(id,token_hash,subject,issuer,kind,name,expires_at,created_at) VALUES(?,?,?,?,?,?,?,?)`, c.ID, hash, c.Subject, c.Issuer, c.Kind, c.Name, c.ExpiresAt, c.CreatedAt)
-	return err
+	return s.withTx(ctx, func(tx *sql.Tx) error {
+		if _, err := tx.ExecContext(ctx, `INSERT INTO auth_credentials(id,token_hash,subject,issuer,kind,name,expires_at,created_at) VALUES(?,?,?,?,?,?,?,?)`, c.ID, hash, c.Subject, c.Issuer, c.Kind, c.Name, c.ExpiresAt, c.CreatedAt); err != nil {
+			return err
+		}
+		details, _ := json.Marshal(map[string]string{"kind": c.Kind})
+		_, err := tx.ExecContext(ctx, `INSERT INTO audit_events(occurred_at,issuer,subject,credential_id,action,resource,status,details) VALUES(?,?,?,?,?,?,200,?)`, time.Now().Unix(), c.Issuer, c.Subject, c.ID, "credential.issue", c.ID, string(details))
+		return err
+	})
 }
 
 func (s *Store) FindCredential(ctx context.Context, hash, kind string) (Credential, error) {
 	var c Credential
-	err := s.db.QueryRowContext(ctx, `SELECT id,subject,issuer,kind,name,expires_at,created_at FROM auth_credentials WHERE token_hash=? AND kind=? AND expires_at>?`, hash, kind, time.Now().Unix()).Scan(&c.ID, &c.Subject, &c.Issuer, &c.Kind, &c.Name, &c.ExpiresAt, &c.CreatedAt)
+	err := s.db.QueryRowContext(ctx, `SELECT id,subject,issuer,kind,name,expires_at,created_at,last_used_at FROM auth_credentials WHERE token_hash=? AND kind=? AND expires_at>?`, hash, kind, time.Now().Unix()).Scan(&c.ID, &c.Subject, &c.Issuer, &c.Kind, &c.Name, &c.ExpiresAt, &c.CreatedAt, &c.LastUsedAt)
 	return c, err
 }
 
-func (s *Store) ListCredentials(ctx context.Context, subject, issuer string) ([]Credential, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT id,subject,issuer,kind,name,expires_at,created_at FROM auth_credentials WHERE subject=? AND issuer=? AND expires_at>? ORDER BY created_at DESC`, subject, issuer, time.Now().Unix())
+func (s *Store) ListCredentials(ctx context.Context, subject, issuer string, all bool) ([]Credential, error) {
+	rows, err := s.db.QueryContext(ctx, `SELECT id,subject,issuer,kind,name,expires_at,created_at,last_used_at FROM auth_credentials WHERE (subject=? OR ?) AND issuer=? AND expires_at>? ORDER BY created_at DESC`, subject, all, issuer, time.Now().Unix())
 	if err != nil {
 		return nil, err
 	}
@@ -63,7 +71,7 @@ func (s *Store) ListCredentials(ctx context.Context, subject, issuer string) ([]
 	result := []Credential{}
 	for rows.Next() {
 		var c Credential
-		if err := rows.Scan(&c.ID, &c.Subject, &c.Issuer, &c.Kind, &c.Name, &c.ExpiresAt, &c.CreatedAt); err != nil {
+		if err := rows.Scan(&c.ID, &c.Subject, &c.Issuer, &c.Kind, &c.Name, &c.ExpiresAt, &c.CreatedAt, &c.LastUsedAt); err != nil {
 			return nil, err
 		}
 		result = append(result, c)
@@ -71,16 +79,27 @@ func (s *Store) ListCredentials(ctx context.Context, subject, issuer string) ([]
 	return result, rows.Err()
 }
 
-func (s *Store) RevokeCredential(ctx context.Context, id, subject, issuer string, admin bool) error {
-	result, err := s.db.ExecContext(ctx, `DELETE FROM auth_credentials WHERE id=? AND ((subject=? AND issuer=?) OR ?)`, id, subject, issuer, admin)
-	if err != nil {
-		return err
-	}
-	n, err := result.RowsAffected()
-	if err == nil && n == 0 {
-		return sql.ErrNoRows
-	}
+func (s *Store) TouchCredential(ctx context.Context, id string) error {
+	_, err := s.db.ExecContext(ctx, `UPDATE auth_credentials SET last_used_at=? WHERE id=? AND last_used_at<?`, time.Now().Unix(), id, time.Now().Unix()-60)
 	return err
+}
+
+func (s *Store) RevokeCredential(ctx context.Context, id, subject, issuer string, admin bool) error {
+	return s.withTx(ctx, func(tx *sql.Tx) error {
+		result, err := tx.ExecContext(ctx, `DELETE FROM auth_credentials WHERE id=? AND ((subject=? AND issuer=?) OR ?)`, id, subject, issuer, admin)
+		if err != nil {
+			return err
+		}
+		n, err := result.RowsAffected()
+		if err != nil {
+			return err
+		}
+		if n == 0 {
+			return sql.ErrNoRows
+		}
+		_, err = tx.ExecContext(ctx, `INSERT INTO audit_events(occurred_at,issuer,subject,credential_id,action,resource,status,details) VALUES(?,?,?,?,?,?,200,'{}')`, time.Now().Unix(), issuer, subject, id, "credential.revoke", id)
+		return err
+	})
 }
 
 func (s *Store) PutAuthFlow(ctx context.Context, key, kind, payload string) error {

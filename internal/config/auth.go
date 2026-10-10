@@ -25,11 +25,12 @@ type OIDCConfig struct {
 }
 
 type PrincipalConfig struct {
-	Subject       string   `mapstructure:"subject"`
-	Name          string   `mapstructure:"name"`
-	Admin         bool     `mapstructure:"admin"`
-	Projects      []string `mapstructure:"projects"`
-	SyncProjects  []string `mapstructure:"sync_projects"`
+	Subject       string   `mapstructure:"subject" json:"subject"`
+	Name          string   `mapstructure:"name" json:"name"`
+	Admin         bool     `mapstructure:"admin" json:"admin"`
+	Disabled      bool     `mapstructure:"disabled" json:"disabled"`
+	Projects      []string `mapstructure:"projects" json:"projects"`
+	SyncProjects  []string `mapstructure:"sync_projects" json:"syncProjects"`
 	SyncSources   []string `mapstructure:"sync_sources" json:"syncSources"`
 	UploadSources []string `mapstructure:"upload_sources" json:"uploadSources"`
 }
@@ -71,7 +72,7 @@ func (c Config) ValidateAuth() error {
 	}
 	seen := map[string]bool{}
 	for _, p := range a.Principals {
-		if p.Subject == "" || seen[p.Subject] {
+		if strings.TrimSpace(p.Subject) == "" || seen[p.Subject] {
 			return errors.New("auth.principals require unique nonempty subjects")
 		}
 		seen[p.Subject] = true

@@ -542,7 +542,16 @@ func TestBrowserFixture(t *testing.T) {
 	}
 	f := newFixture(t)
 	t.Logf("OIDC_BROWSER_QA_URL=%s", f.server.URL)
-	deadline := time.Now().Add(5 * time.Minute)
+	if os.Getenv("OHYEAH_AUTH_QA_ADMIN") == "1" {
+		f.mu.Lock()
+		f.subject = "admin"
+		f.mu.Unlock()
+		source := model.Source{ID: "allowed/remote/node", ProjectID: "allowed", WorkspaceID: "allowed", TypeID: "remote", Driver: model.DriverUpload, Path: "/remote", Enabled: true, State: model.SourceStateActive, Options: map[string]any{"__ohyeah_writer": "admin"}, TypeRevision: 1, MountRevision: 1}
+		if err := f.state.UpsertSource(context.Background(), source); err != nil {
+			t.Fatal(err)
+		}
+	}
+	deadline := time.Now().Add(9 * time.Minute)
 	for time.Now().Before(deadline) {
 		if _, err := os.Stat(stop); err == nil {
 			return

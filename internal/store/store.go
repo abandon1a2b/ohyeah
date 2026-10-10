@@ -75,11 +75,14 @@ func (s *Store) migrate(ctx context.Context) error {
 	if err := s.db.QueryRowContext(ctx, `PRAGMA user_version`).Scan(&version); err != nil {
 		return err
 	}
-	if version > 6 {
+	if version > 8 {
 		return fmt.Errorf("state database schema version %d is newer than this ohyeah binary", version)
 	}
-	if version == 6 {
+	if version == 8 {
 		return nil
+	}
+	if version == 6 || version == 7 {
+		return s.migrateIdentity(ctx)
 	}
 	if version == 5 {
 		return s.migrateCentral(ctx)
@@ -597,10 +600,26 @@ func (s *Store) ReplaceDocument(ctx context.Context, doc model.Document) error {
 	})
 }
 
-func (s *Store) ApplyScanResult(ctx context.Context, sourceID string, result model.ScanResult) (changed, deleted int, err error) {
+func (s *Store) ApplyScanResult(ctx context.Context, sourceID string, result model.ScanResult, audit ...AuditEvent) (changed, deleted int, err error) {
 	err = s.withTx(ctx, func(tx *sql.Tx) error {
 		changed, deleted, err = applyScanResultTx(ctx, tx, sourceID, result)
-		return err
+		if err != nil {
+			return err
+		}
+		if len(audit) > 0 {
+			e := audit[0]
+			details, err := json.Marshal(map[string]int{"changed": changed, "deleted": deleted})
+			if err != nil {
+				return err
+			}
+			kind := e.ActorKind
+			if kind == "" {
+				kind = "principal"
+			}
+			_, err = tx.ExecContext(ctx, `INSERT INTO audit_events(occurred_at,issuer,subject,credential_id,action,resource,status,details,actor_kind) VALUES(?,?,?,?,?,?,200,?,?)`, time.Now().Unix(), e.Issuer, e.Subject, e.CredentialID, e.Action, sourceID, string(details), kind)
+			return err
+		}
+		return nil
 	})
 	return
 }
@@ -609,6 +628,9 @@ func applyScanResultTx(ctx context.Context, tx *sql.Tx, sourceID string, result 
 	err = func() error {
 		seen := make(map[string]struct{}, len(result.Documents))
 		for _, document := range result.Documents {
+			if document.Object.SourceID != sourceID {
+				return errors.New("scan document belongs to a different source")
+			}
 			seen[document.Object.ExternalID] = struct{}{}
 			var currentHash string
 			hashErr := tx.QueryRowContext(ctx, `SELECT content_hash FROM source_objects WHERE source_id=? AND external_id=?`, sourceID, document.Object.ExternalID).Scan(&currentHash)

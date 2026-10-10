@@ -49,7 +49,7 @@ func New(ctx context.Context, cfg config.Config, state *store.Store) (*Service, 
 	if err := cfg.ValidateAuth(); err != nil {
 		return nil, err
 	}
-	s := &Service{cfg: cfg.Auth, store: state, http: &http.Client{Timeout: 10 * time.Second}}
+	s := &Service{cfg: cfg.Auth, store: state, http: &http.Client{Timeout: 10 * time.Second, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}}
 	if !s.Enabled() {
 		return s, nil
 	}
@@ -87,21 +87,38 @@ func hash(value string) string {
 func equal(a, b string) bool      { return subtle.ConstantTimeCompare([]byte(a), []byte(b)) == 1 }
 func (s *Service) origin() string { return strings.TrimRight(s.cfg.PublicURL, "/") }
 
-func (s *Service) principal(subject string) (config.PrincipalConfig, bool) {
+func (s *Service) principal(ctx context.Context, subject string) (config.PrincipalConfig, bool, error) {
+	policy, err := s.store.PrincipalPolicy(ctx, s.cfg.OIDC.Issuer, subject)
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return config.PrincipalConfig{}, false, err
+	}
+	if err == nil && policy.Principal != nil {
+		return *policy.Principal, !policy.Principal.Disabled, nil
+	}
 	for _, p := range s.cfg.Principals {
 		if p.Subject == subject {
-			return p, true
+			return p, !p.Disabled, nil
 		}
 	}
-	return config.PrincipalConfig{}, false
+	return config.PrincipalConfig{}, false, nil
 }
 
 func (s *Service) cookie(c *fiber.Ctx, name, value string, ttl time.Duration) {
-	c.Cookie(&fiber.Cookie{Name: name, Value: value, Path: "/", HTTPOnly: true, Secure: strings.HasPrefix(s.origin(), "https://"), SameSite: "Lax", Expires: time.Now().Add(ttl), MaxAge: int(ttl.Seconds())})
+	c.Cookie(&fiber.Cookie{Name: s.cookieName(name), Value: value, Path: "/", HTTPOnly: true, Secure: strings.HasPrefix(s.origin(), "https://"), SameSite: "Lax", Expires: time.Now().Add(ttl), MaxAge: int(ttl.Seconds())})
 }
 
+func (s *Service) cookieName(name string) string {
+	if strings.HasPrefix(s.origin(), "https://") {
+		return "__Host-" + name
+	}
+	return name
+}
+func (s *Service) readCookie(c *fiber.Ctx, name string) string { return c.Cookies(s.cookieName(name)) }
+
 func (s *Service) issue(ctx context.Context, subject, kind, name string, ttl time.Duration) (string, store.Credential, error) {
-	if _, ok := s.principal(subject); !ok {
+	if _, ok, err := s.principal(ctx, subject); err != nil {
+		return "", store.Credential{}, err
+	} else if !ok {
 		return "", store.Credential{}, fiber.ErrForbidden
 	}
 	token, err := random()
@@ -181,7 +198,7 @@ func (s *Service) Authenticate(c *fiber.Ctx) error {
 		c.Locals("localAuth", true)
 		return s.audited(c, "local", "local", "")
 	}
-	raw, kind := c.Cookies(sessionCookie), "session"
+	raw, kind := s.readCookie(c, sessionCookie), "session"
 	if authorization := c.Get("Authorization"); authorization != "" {
 		if !strings.HasPrefix(authorization, "Bearer ") {
 			return fiber.ErrUnauthorized
@@ -201,9 +218,16 @@ func (s *Service) Authenticate(c *fiber.Ctx) error {
 	if credential.Issuer != s.cfg.OIDC.Issuer {
 		return fiber.ErrUnauthorized
 	}
-	p, ok := s.principal(credential.Subject)
+	p, ok, err := s.principal(c.Context(), credential.Subject)
+	if err != nil {
+		return err
+	}
 	if !ok {
-		return fiber.ErrForbidden
+		if c.Path() == "/auth/logout" {
+			p = config.PrincipalConfig{Subject: credential.Subject}
+		} else {
+			return fiber.ErrForbidden
+		}
 	}
 	c.Locals("identity", &Identity{PrincipalConfig: p, Credential: credential})
 	if kind == "session" && c.Method() != "GET" && c.Method() != "HEAD" {
@@ -213,6 +237,11 @@ func (s *Service) Authenticate(c *fiber.Ctx) error {
 		}
 		if c.Get("Origin") != s.origin() || !equal(csrf, hash("csrf:"+raw)) {
 			return fiber.NewError(403, "invalid CSRF token or origin")
+		}
+	}
+	if credential.LastUsedAt < time.Now().Unix()-60 {
+		if err := s.store.TouchCredential(c.Context(), credential.ID); err != nil {
+			return err
 		}
 	}
 	return s.audited(c, p.Subject, credential.Issuer, credential.ID)
@@ -303,11 +332,31 @@ func (s *Service) Register(server *fiber.App) {
 		return c.JSON(fiber.Map{"loggedOut": true})
 	})
 	server.Get("/auth/tokens", s.Authenticate, func(c *fiber.Ctx) error {
-		result, err := s.store.ListCredentials(c.Context(), Current(c).Subject, s.cfg.OIDC.Issuer)
+		all := c.Query("all") == "true"
+		if all && !Current(c).Admin {
+			return fiber.ErrForbidden
+		}
+		result, err := s.store.ListCredentials(c.Context(), Current(c).Subject, s.cfg.OIDC.Issuer, all)
 		if err != nil {
 			return err
 		}
 		return c.JSON(result)
+	})
+	server.Post("/auth/tokens/:id/rotate", s.Authenticate, func(c *fiber.Ctx) error {
+		p := Current(c)
+		token, err := random()
+		if err != nil {
+			return err
+		}
+		id, err := random()
+		if err != nil {
+			return err
+		}
+		credential, err := s.store.RotateCredential(c.Context(), c.Params("id"), p.Subject, s.cfg.OIDC.Issuer, p.Admin, store.Credential{ID: id, CreatedAt: time.Now().Unix()}, hash(token))
+		if err != nil {
+			return err
+		}
+		return c.JSON(fiber.Map{"token": token, "credential": credential})
 	})
 	server.Delete("/auth/tokens/:id", s.Authenticate, func(c *fiber.Ctx) error {
 		p := Current(c)
@@ -322,32 +371,41 @@ func (s *Service) Register(server *fiber.App) {
 			return err
 		}
 		var request struct {
-			Subject string `json:"subject"`
-			Name    string `json:"name"`
+			Subject   string `json:"subject"`
+			Name      string `json:"name"`
+			ExpiresIn int64  `json:"expiresIn"`
 		}
 		if err := c.BodyParser(&request); err != nil || request.Subject == "" || len(request.Name) > 100 {
 			return fiber.ErrBadRequest
 		}
-		token, credential, err := s.issue(c.Context(), request.Subject, "token", request.Name, s.cfg.TokenTTL)
+		ttl := s.cfg.TokenTTL
+		if request.ExpiresIn != 0 {
+			if request.ExpiresIn < 1 || request.ExpiresIn > int64(s.cfg.TokenTTL.Seconds()) {
+				return fiber.NewError(400, "expiresIn exceeds token lifetime policy")
+			}
+			ttl = time.Duration(request.ExpiresIn) * time.Second
+		}
+		token, credential, err := s.issue(c.Context(), request.Subject, "token", request.Name, ttl)
 		if err != nil {
 			return err
 		}
 		return c.JSON(fiber.Map{"token": token, "credential": credential})
 	})
+	s.registerPrincipals(server)
 	server.Use("/auth", func(c *fiber.Ctx) error { return fiber.ErrNotFound })
 }
 
 func (s *Service) me(c *fiber.Ctx) error {
 	p := Current(c)
-	result := fiber.Map{"subject": p.Subject, "name": p.Name, "admin": p.Admin, "projects": p.Projects, "syncProjects": p.SyncProjects, "syncSources": p.SyncSources, "uploadSources": p.UploadSources, "credential": p.Credential}
+	result := fiber.Map{"subject": p.Subject, "name": p.Name, "admin": p.Admin, "projects": p.Projects, "syncProjects": p.SyncProjects, "syncSources": p.SyncSources, "uploadSources": p.UploadSources, "credential": p.Credential, "tokenTTLSeconds": int64(s.cfg.TokenTTL.Seconds())}
 	if p.Credential.Kind == "session" {
-		result["csrf"] = hash("csrf:" + c.Cookies(sessionCookie))
+		result["csrf"] = hash("csrf:" + s.readCookie(c, sessionCookie))
 	}
 	return c.JSON(result)
 }
 
 func (s *Service) browserLogin(c *fiber.Ctx) error {
-	credential, err := s.store.FindCredential(c.Context(), hash(c.Cookies(sessionCookie)), "session")
+	credential, err := s.store.FindCredential(c.Context(), hash(s.readCookie(c, sessionCookie)), "session")
 	if err != nil && !errors.Is(err, sql.ErrNoRows) {
 		return err
 	}
@@ -392,7 +450,7 @@ func (s *Service) callback(c *fiber.Ctx) error {
 		return fiber.NewError(400, "invalid or expired login state")
 	}
 	var flow loginFlow
-	if json.Unmarshal([]byte(payload), &flow) != nil || flow.Issuer != s.cfg.OIDC.Issuer || !equal(hash(c.Cookies(bindingCookie)), flow.Binding) {
+	if json.Unmarshal([]byte(payload), &flow) != nil || flow.Issuer != s.cfg.OIDC.Issuer || !equal(hash(s.readCookie(c, bindingCookie)), flow.Binding) {
 		return fiber.NewError(400, "login browser binding mismatch")
 	}
 	s.cookie(c, bindingCookie, "", -time.Hour)
@@ -417,7 +475,7 @@ func (s *Service) callback(c *fiber.Ctx) error {
 		return err
 	}
 	// Rotate the old browser credential when logging in again.
-	if old, err := s.store.FindCredential(ctx, hash(c.Cookies(sessionCookie)), "session"); err == nil {
+	if old, err := s.store.FindCredential(ctx, hash(s.readCookie(c, sessionCookie)), "session"); err == nil {
 		_ = s.store.RevokeCredential(ctx, old.ID, old.Subject, old.Issuer, false)
 	}
 	s.cookie(c, sessionCookie, session, s.cfg.SessionTTL)
@@ -452,7 +510,7 @@ func (s *Service) pairPage(c *fiber.Ctx) error {
 	}
 	c.Type("html")
 	c.Set("Content-Security-Policy", "default-src 'none'; form-action 'self'; frame-ancestors 'none'; base-uri 'none'")
-	return consent.Execute(c.Response().BodyWriter(), map[string]string{"Subject": Current(c).Subject, "Code": c.Query("code"), "CSRF": hash("csrf:" + c.Cookies(sessionCookie))})
+	return consent.Execute(c.Response().BodyWriter(), map[string]string{"Subject": Current(c).Subject, "Code": c.Query("code"), "CSRF": hash("csrf:" + s.readCookie(c, sessionCookie))})
 }
 
 func (s *Service) approvePair(c *fiber.Ctx) error {

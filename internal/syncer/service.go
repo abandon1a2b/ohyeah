@@ -79,6 +79,17 @@ func (s *Service) SyncSource(ctx context.Context, registered model.Source) (run 
 	lock := lockValue.(*sync.Mutex)
 	lock.Lock()
 	defer lock.Unlock()
+	current, err := s.store.GetSource(ctx, registered.ID)
+	if err != nil {
+		return run, err
+	}
+	registered = current
+	if !registered.Enabled || registered.State != model.SourceStateActive {
+		return run, errors.New("source is disabled or detached")
+	}
+	if registered.Driver == model.DriverUpload {
+		return run, errors.New("upload sources cannot execute a collector")
+	}
 	runID, err := s.store.StartSyncRun(ctx, registered.ID)
 	if err != nil {
 		return run, err
@@ -103,7 +114,11 @@ func (s *Service) SyncSource(ctx context.Context, registered model.Source) (run 
 		return run, err
 	}
 	run.Scanned = len(scanResult.Documents)
-	changed, deleted, err := s.store.ApplyScanResult(ctx, registered.ID, scanResult)
+	issuer := "local"
+	if s.config.Auth.Mode == "oidc" {
+		issuer = s.config.Auth.OIDC.Issuer
+	}
+	changed, deleted, err := s.store.ApplyScanResult(ctx, registered.ID, scanResult, store.AuditEvent{Issuer: issuer, Subject: "system", Action: "collector.commit", ActorKind: "system"})
 	if err != nil {
 		return run, err
 	}

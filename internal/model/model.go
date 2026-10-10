@@ -36,6 +36,7 @@ const (
 )
 
 type Source struct {
+	Writer           string          `json:"writer,omitempty"`
 	ID               string          `json:"id"`
 	ProjectID        string          `json:"projectId,omitempty"`
 	ProjectWorkspace string          `json:"projectWorkspace,omitempty"`

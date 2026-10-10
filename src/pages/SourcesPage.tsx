@@ -11,6 +11,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import type { Source, SyncRun } from "../types";
+import { UploadBatchButton } from "@/components/upload-batch-button";
 
 export function SourcesPage({
   sources,
@@ -19,6 +20,8 @@ export function SourcesPage({
   onSync,
   canSyncAll = true,
   canSync = () => true,
+  canUpload = () => false,
+  onUploaded = () => {},
 }: {
   sources: Source[];
   runs: SyncRun[];
@@ -26,6 +29,8 @@ export function SourcesPage({
   onSync: (id?: string) => void;
   canSyncAll?: boolean;
   canSync?: (source: Source) => boolean;
+  canUpload?: (source: Source) => boolean;
+  onUploaded?: (pending: boolean) => void;
 }) {
   const latest = new Map<string, SyncRun>();
   for (const run of runs)
@@ -39,16 +44,18 @@ export function SourcesPage({
             已注册的数据挂载与最近同步状态
           </p>
         </div>
-        {canSyncAll && <Button disabled={!!busy} onClick={() => onSync()}>
-          {busy === "all" ? (
-            <Spinner label="同步全部" />
-          ) : (
-            <>
-              <RefreshCw data-icon="inline-start" />
-              同步全部
-            </>
-          )}
-        </Button>}
+        {canSyncAll && (
+          <Button disabled={!!busy} onClick={() => onSync()}>
+            {busy === "all" ? (
+              <Spinner label="同步全部" />
+            ) : (
+              <>
+                <RefreshCw data-icon="inline-start" />
+                同步全部
+              </>
+            )}
+          </Button>
+        )}
       </div>
       {sources.length === 0 ? (
         <Empty
@@ -79,18 +86,34 @@ export function SourcesPage({
                     <span className="text-xs text-muted-foreground">
                       {run ? `${run.status} · 变更 ${run.changed}` : "尚未同步"}
                     </span>
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      disabled={!!busy || !source.enabled || !canSync(source)}
-                      onClick={() => onSync(source.id)}
-                    >
-                      {busy === source.id ? <Spinner label="同步中" /> : "同步"}
-                    </Button>
+                    {source.driver === "upload" ? (
+                      <UploadBatchButton
+                        sourceId={source.id}
+                        disabled={
+                          !!busy || !source.enabled || !canUpload(source)
+                        }
+                        onUploaded={onUploaded}
+                      />
+                    ) : (
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        disabled={!!busy || !source.enabled || !canSync(source)}
+                        onClick={() => onSync(source.id)}
+                      >
+                        {busy === source.id ? (
+                          <Spinner label="同步中" />
+                        ) : (
+                          "同步"
+                        )}
+                      </Button>
+                    )}
                   </div>
                   {run && (
                     <div className="flex flex-col gap-1 text-xs text-muted-foreground">
-                      <span>开始 {new Date(run.startedAt).toLocaleString()}</span>
+                      <span>
+                        开始 {new Date(run.startedAt).toLocaleString()}
+                      </span>
                       <span>结束 {finishLabel(run)}</span>
                     </div>
                   )}
@@ -151,18 +174,30 @@ export function SourcesPage({
                         )}
                       </TableCell>
                       <TableCell className="text-right">
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          disabled={!!busy || !source.enabled || !canSync(source)}
-                          onClick={() => onSync(source.id)}
-                        >
-                          {busy === source.id ? (
-                            <Spinner label="同步中" />
-                          ) : (
-                            "同步"
-                          )}
-                        </Button>
+                        {source.driver === "upload" ? (
+                          <UploadBatchButton
+                            sourceId={source.id}
+                            disabled={
+                              !!busy || !source.enabled || !canUpload(source)
+                            }
+                            onUploaded={onUploaded}
+                          />
+                        ) : (
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            disabled={
+                              !!busy || !source.enabled || !canSync(source)
+                            }
+                            onClick={() => onSync(source.id)}
+                          >
+                            {busy === source.id ? (
+                              <Spinner label="同步中" />
+                            ) : (
+                              "同步"
+                            )}
+                          </Button>
+                        )}
                       </TableCell>
                     </TableRow>
                   );

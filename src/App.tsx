@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useState } from "react";
-import { AuthGate, logout, type Identity } from './auth';
+import { lazy, Suspense, useCallback, useEffect, useState } from "react";
+import { AuthGate, logout, type Identity } from "./auth";
 import { api } from "./api";
 import { Badge, Notice } from "./components";
 import { AppSidebar, navigation, type Page } from "@/components/app-sidebar";
@@ -31,8 +31,14 @@ import type {
   SyncRun,
 } from "./types";
 
+const AccessPage = lazy(() =>
+  import("./pages/AccessPage").then((module) => ({
+    default: module.AccessPage,
+  })),
+);
+
 export default function App() {
-  return <AuthGate>{identity => <Workspace identity={identity} />}</AuthGate>;
+  return <AuthGate>{(identity) => <Workspace identity={identity} />}</AuthGate>;
 }
 
 function Workspace({ identity }: { identity: Identity | null }) {
@@ -55,23 +61,37 @@ function Workspace({ identity }: { identity: Identity | null }) {
     text: string;
   } | null>(null);
   const title = navigation.find((item) => item.id === page)?.label ?? "详情";
+  useEffect(() => {
+    if (!admin && page !== "search" && page !== "sources" && page !== "access")
+      setPage("search");
+  }, [admin, page]);
 
-  const load = useCallback(async (silent = false) => {
-    try {
-      const [s, p, src, r] = await Promise.all([
-        api.status(),
-        api.projects(),
-        api.sources(),
-        admin ? api.runs() : Promise.resolve([]),
-      ]);
-      setStatus(s);
-      setProjects(p);
-      setSources(src);
-      setRuns(admin ? r : (await Promise.all(src.map(source => api.runs(1, source.id)))).flat());
-    } catch (error) {
-      if (!silent) setNotice({ kind: "error", text: (error as Error).message });
-    }
-  }, [admin]);
+  const load = useCallback(
+    async (silent = false) => {
+      try {
+        const [s, p, src, r] = await Promise.all([
+          api.status(),
+          api.projects(),
+          api.sources(),
+          admin ? api.runs() : Promise.resolve([]),
+        ]);
+        setStatus(s);
+        setProjects(p);
+        setSources(src);
+        setRuns(
+          admin
+            ? r
+            : (
+                await Promise.all(src.map((source) => api.runs(1, source.id)))
+              ).flat(),
+        );
+      } catch (error) {
+        if (!silent)
+          setNotice({ kind: "error", text: (error as Error).message });
+      }
+    },
+    [admin],
+  );
 
   useEffect(() => {
     load();
@@ -210,9 +230,21 @@ function Workspace({ identity }: { identity: Identity | null }) {
           backendAvailable={status?.backend === "available"}
           onNavigate={changePage}
           admin={admin}
+          authenticated={identity !== null}
         />
         <SidebarInset>
-          <SiteHeader title={title} onRefresh={() => load()} onLogout={identity ? () => logout().catch(error => setNotice({ kind: 'error', text: error.message })) : undefined} />
+          <SiteHeader
+            title={title}
+            onRefresh={() => load()}
+            onLogout={
+              identity
+                ? () =>
+                    logout().catch((error) =>
+                      setNotice({ kind: "error", text: error.message }),
+                    )
+                : undefined
+            }
+          />
           <div className="flex flex-1 flex-col">
             <div className="@container/main flex flex-1 flex-col gap-2">
               <div
@@ -256,7 +288,28 @@ function Workspace({ identity }: { identity: Identity | null }) {
                     busy={busy}
                     onSync={sync}
                     canSyncAll={admin}
-                    canSync={source => admin || (identity?.syncProjects ?? []).includes(source.projectId)}
+                    canUpload={(source) =>
+                      source.writer === (identity?.subject ?? "local") &&
+                      (admin ||
+                        (identity?.uploadSources ?? []).includes(source.id))
+                    }
+                    onUploaded={(pending) => {
+                      setNotice({
+                        kind: "success",
+                        text: pending
+                          ? "批次已提交，索引等待投递"
+                          : "批次已提交",
+                      });
+                      void load(true);
+                    }}
+                    canSync={(source) =>
+                      source.driver !== "upload" &&
+                      (admin ||
+                        (identity?.syncProjects ?? []).includes(
+                          source.projectId,
+                        ) ||
+                        (identity?.syncSources ?? []).includes(source.id))
+                    }
                   />
                 )}
                 {page === "config" && (
@@ -270,6 +323,21 @@ function Workspace({ identity }: { identity: Identity | null }) {
                     onValidate={validate}
                     onSave={save}
                   />
+                )}
+                {page === "access" && identity && (
+                  <Suspense
+                    fallback={
+                      <p className="py-6 text-sm text-muted-foreground">
+                        加载中…
+                      </p>
+                    }
+                  >
+                    <AccessPage
+                      identity={identity}
+                      projects={projects}
+                      sources={sources}
+                    />
+                  </Suspense>
                 )}
                 {page === "index" && (
                   <IndexPage

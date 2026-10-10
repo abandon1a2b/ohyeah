@@ -1,0 +1,41 @@
+{
+  "realm": "ohyeah",
+  "enabled": true,
+  "sslRequired": "none",
+  "registrationAllowed": false,
+  "clients": [
+    {
+      "clientId": "ohyeah",
+      "enabled": true,
+      "protocol": "openid-connect",
+      "publicClient": true,
+      "standardFlowEnabled": true,
+      "directAccessGrantsEnabled": false,
+      "redirectUris": ["http://127.0.0.1:8788/auth/callback"],
+      "webOrigins": ["http://127.0.0.1:8788"],
+      "attributes": {"pkce.code.challenge.method": "S256"}
+    }
+  ],
+  "users": [
+    {
+      "id": "8c32df15-6341-45f3-8f4c-c724b14c7101",
+      "username": "admin",
+      "firstName": "Demo",
+      "lastName": "Administrator",
+      "email": "admin@example.invalid",
+      "emailVerified": true,
+      "enabled": true,
+      "credentials": [{"type":"password","value":"admin-demo-only-local","temporary":false}]
+    },
+    {
+      "id": "8c32df15-6341-45f3-8f4c-c724b14c7102",
+      "username": "reader",
+      "firstName": "Demo",
+      "lastName": "Reader",
+      "email": "reader@example.invalid",
+      "emailVerified": true,
+      "enabled": true,
+      "credentials": [{"type":"password","value":"reader-demo-only-local","temporary":false}]
+    }
+  ]
+}

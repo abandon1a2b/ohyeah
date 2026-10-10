@@ -48,9 +48,13 @@ Set `OHYEAH_AUTH_OIDC_CLIENT_SECRET` in the service environment when the provide
 
 `public_url` must be the canonical external origin without a path. Terminate HTTPS at a trusted reverse proxy and restrict direct access to the internal HTTP listener. Issuer, discovery endpoints, and public URL require HTTPS; literal loopback HTTP URLs are permitted for development. Request Host headers do not influence callback URLs or generated client configuration.
 
-Subjects are stable `sub` identifiers from the configured issuer. Email addresses and display names do not grant permissions. Unknown subjects are denied; a verified but unauthorized login logs its issuer and subject so the operator can add a binding. Empty `principals` permits no users. Change auth configuration and restart the service to apply it. OIDC discovery failure prevents HTTP startup; authentication never silently falls back to local mode.
+Provider back-channel HTTP redirects are rejected. Configure canonical discovery, token and JWKS endpoints so credentials cannot be forwarded by an unexpected redirect.
 
-Changing the configured issuer invalidates existing Ohyeah credentials. Existing principals and permissions are checked on every request using the startup configuration. Provider account disablement or provider logout does not immediately revoke existing Ohyeah credentials: revoke them locally or let their fixed lifetime expire.
+Subjects are stable `sub` identifiers from the configured issuer. Email addresses and display names do not grant permissions. Unknown subjects are denied; a verified but unauthorized login logs its issuer and subject so the operator can add a binding. Configuration principals provide the bootstrap policy. Administrators can add or override principals online through Access Management; issuer-scoped SQLite overrides take effect on the next request and survive restarts. Resetting an override restores the startup configuration; for an online-only account it removes authorization. Empty configuration and no online grants permit no users. Identity-provider settings still require restart. OIDC discovery failure prevents HTTP startup; authentication never silently falls back to local mode.
+
+Changing the configured issuer invalidates existing Ohyeah credentials. Existing principals and permissions are checked on every request against effective online policy. Local account disablement immediately blocks existing tokens; the holder can still logout to revoke them. Provider account disablement or provider logout does not immediately revoke existing Ohyeah credentials: disable the account in Ohyeah, revoke its credentials, or let their fixed lifetime expire.
+
+Disabling an account suspends its permissions but does not delete its credentials. Re-enabling it permits still-valid credentials again unless they were explicitly revoked; use revocation for permanent credential invalidation.
 
 ## Browser Login And CLI Pairing
 
@@ -78,7 +82,15 @@ python3 ohyeah.py revoke <credential-id>
 python3 ohyeah.py logout
 ```
 
-`tokens` lists the current subject's active browser and CLI credentials without secrets. Users can revoke their own credentials; administrators can revoke any known credential ID. `logout` revokes the presented credential, then deletes its saved local file. If `OHYEAH_TOKEN` is supplied, logout revokes that token too, but cannot remove it from the parent process environment.
+`tokens` lists the current subject's active browser and CLI credentials without secrets. Access Management offers the same operations in the Web UI, with an admin-only all-account view. Credentials include expiry and recent use (updated at most once per minute). Users can revoke their own credentials; administrators can revoke any known credential ID. `logout` revokes the presented credential, then deletes its saved local file. If `OHYEAH_TOKEN` is supplied, logout revokes that token too, but cannot remove it from the parent process environment.
+
+`POST /auth/tokens/<id>/rotate` atomically replaces an active API token and revokes the old token. Rotation never extends the original absolute expiry, and it cannot rotate browser sessions. The new token is returned once. Access Management offers rotation and explicitly shows the new secret once; update the calling service's secret after rotating. A failed replacement transaction preserves the old credential. Issuance accepts `expiresIn` in seconds, capped by `token_ttl`.
+
+## Online Account Administration
+
+Access Management's account tab edits names, enablement, administrator status, project reads, project-wide sync, exact-source sync and exact-source uploads. Both OIDC users and service accounts use the same principal structure. Machine accounts do not need an OIDC browser login: register their subject, grant limited sources, then issue a token as admin.
+
+The API exposes `GET /auth/principals`, `GET/PUT/DELETE /auth/principals/<subject>`. Subjects are opaque; URL-encode them. PUT accepts `{"expectedVersion":0,"principal":{"subject":"service:node","projects":["example"],"uploadSources":["example/remote/node"]}}`. DELETE requires `?version=N` and resets to the configured baseline. Versions and reset tombstones prevent stale editors from overwriting newer policy; conflicts return 409. Configuration bootstrap administrators cannot be disabled or demoted online, and the active administrator cannot demote itself. Changes to that recovery policy require deliberate configuration editing and restart by the host operator.
 
 ## Permissions
 
@@ -95,7 +107,11 @@ python3 ohyeah.py logout
 | Global statistics / storage paths | `admin: true`; nonadmins receive limited service availability metadata |
 | Issue machine credentials | `admin: true`, for a preconfigured principal |
 
-The health probe, authentication entry points, static assets and downloadable clients are public. They contain no user or project data. The server logs credential issuance/revocation and synchronization requests with subject and credential/source IDs, never bearer tokens. Deployments should retain these logs; a dedicated persistent audit-query API is not included yet.
+The health probe, authentication entry points, static assets and downloadable clients are public. They contain no user or project data. The server stores credential issuance, revocation, rotation, and authenticated mutation records in SQLite, with subject and credential/source IDs, never bearer tokens. Upload commit events are saved atomically with the batch. A mutation first writes a durable pending audit record; if audit storage is unavailable it is not executed. Pending status 0 can indicate a process interruption, so it must not be interpreted as success. Normal completion records the HTTP status, including permission denials by an authenticated account. Logs remain useful for operational diagnostics.
+
+`GET /auth/audit?limit=50&before=N` paginates the current subject's events by descending ID. `all=true` is admin-only and remains restricted to the current issuer. Access Management includes this audit view. `GET /auth/tokens?all=true` likewise supports admin-only credential inventory. Audit retention/backup should be managed with the service's SQLite backup policy; there is no automatic truncation of security history or upload receipts.
+
+Automated central collection records `collector.commit` events with subject `system` in the same SQLite transaction as its data/outbox changes. User-triggered runs additionally have the authenticated request audit and durable sync-run status. The browser refreshes its identity/permissions periodically; server-side checks remain authoritative on every request.
 
 Administrators can issue a token for a configured service principal via `POST /auth/tokens` with JSON `{"subject":"service:collector","name":"collector-node-1"}`. Browser requests require the Origin and CSRF token returned by `/auth/me`; bearer-authenticated administration uses `Authorization: Bearer ...`. The response includes the raw token once. Set that token as `OHYEAH_TOKEN` for the service account. `DELETE /auth/tokens/<id>` revokes it immediately.
 

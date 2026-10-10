@@ -18,6 +18,7 @@ import (
 
 	"github.com/abandon1a2b/ohyeah/internal/managed"
 	"github.com/abandon1a2b/ohyeah/internal/model"
+	protocol "github.com/abandon1a2b/ohyeah/pkg/collector"
 )
 
 // Opt in with an already downloaded, pinned community Meilisearch binary.
@@ -94,6 +95,15 @@ projects:
   integration:
     workspace: %q
     types:
+      remote:
+        collector:
+          mode: upload
+          revision: 1
+        mounts:
+          node:
+            root: /logical/remote
+            revision: 1
+            writer: local
       documents:
         collector:
           command: %q
@@ -246,6 +256,19 @@ projects:
 	if len(search("integration", "updatedmarker")) != 1 || len(search("integration", "cachemarker")) != 0 {
 		t.Fatal("updated record not reflected in search")
 	}
+	var uploadState struct {
+		Version int64  `json:"version"`
+		Scope   string `json:"scopeRevision"`
+	}
+	if err := json.Unmarshal(request("GET", "/api/v1/uploads/state?source=integration/remote/node", nil, 200), &uploadState); err != nil {
+		t.Fatal(err)
+	}
+	batch := protocol.UploadBatch{ProtocolVersion: 1, SourceID: "integration/remote/node", BatchID: "real-upload", ExpectedVersion: uploadState.Version, ScopeRevision: uploadState.Scope, Envelopes: []protocol.Envelope{{Type: "document", Document: &protocol.Document{ExternalID: "remote", Reference: map[string]string{"url": "https://example.invalid/remote"}, Units: []protocol.Unit{{Key: "final", Content: "remotemarker verified uploaded evidence"}}}}, {Type: "complete", Mode: "snapshot", Cursor: json.RawMessage(`{"offset":9}`)}}}
+	payload, _ := json.Marshal(batch)
+	request("POST", "/api/v1/uploads", payload, 200)
+	if len(search("integration", "remotemarker")) != 1 {
+		t.Fatal("remote upload was not searchable")
+	}
 	stop(run, true)
 	// Removing only the derived index simulates index loss without touching SQLite.
 	if err := os.RemoveAll(filepath.Join(engineDir, "data-"+managed.Version)); err != nil {
@@ -254,6 +277,13 @@ projects:
 	run = start()
 	if len(search("integration", "updatedmarker")) != 1 {
 		t.Fatal("SQLite index recovery failed")
+	}
+	if len(search("integration", "remotemarker")) != 1 {
+		t.Fatal("remote records were not rebuilt")
+	}
+	var replay protocol.UploadReceipt
+	if err := json.Unmarshal(request("POST", "/api/v1/uploads", payload, 200), &replay); err != nil || !replay.Replayed {
+		t.Fatalf("receipt did not survive restart: %#v %v", replay, err)
 	}
 	if err := os.WriteFile(filepath.Join(root, "records.json"), []byte("invalid JSON"), 0600); err != nil {
 		t.Fatal(err)
@@ -266,6 +296,9 @@ projects:
 	request("POST", "/api/v1/sync", nil, 200)
 	if len(search("integration", "updatedmarker")) != 0 {
 		t.Fatal("snapshot deletion failed")
+	}
+	if len(search("integration", "remotemarker")) != 1 {
+		t.Fatal("central collector snapshot deleted remote upload")
 	}
 	request("GET", "/api/v1/memories/"+id, nil, 404)
 	// Kill only the child; the parent must exit with failure and release HTTP.

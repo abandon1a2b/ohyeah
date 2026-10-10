@@ -110,6 +110,7 @@ func New(application *app.App) *fiber.App {
 		filtered := make([]model.Source, 0, len(sources))
 		for _, source := range sources {
 			if auth.Can(c, source.ProjectID, "read") {
+				source.Writer, _ = source.Options["__ohyeah_writer"].(string)
 				if p := auth.Current(c); p != nil && !p.Admin {
 					source.Options = nil
 					source.Cursor = nil
@@ -153,6 +154,12 @@ func New(application *app.App) *fiber.App {
 			}
 			if !auth.CanSource(c, source, "sync") {
 				return fiber.ErrForbidden
+			}
+			if source.Driver == model.DriverUpload {
+				return fiber.NewError(409, "source expects uploaded batches, not server collector execution")
+			}
+			if !source.Enabled || source.State != model.SourceStateActive {
+				return fiber.NewError(409, "source is disabled or detached")
 			}
 			if p := auth.Current(c); p != nil {
 				slog.Info("sync requested", "subject", p.Subject, "source", source.ID)

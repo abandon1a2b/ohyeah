@@ -1,25 +1,70 @@
-import type { ConfigData, Doctor, MemoryRecord, Project, RegistryAction, SearchHit, Source, Status, SyncRun } from './types'
-import { csrfHeaders } from './auth'
+import type {
+  ConfigData,
+  Doctor,
+  MemoryRecord,
+  Project,
+  RegistryAction,
+  SearchHit,
+  Source,
+  Status,
+  SyncRun,
+} from "./types";
+import { csrfHeaders } from "./auth";
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
-  const response = await fetch(`/api/v1${path}`, { ...init, headers: { 'Content-Type': 'application/json', ...csrfHeaders(), ...init?.headers } })
-  if (response.status === 401) window.location.assign('/auth/login')
-  const body = await response.json().catch(() => ({}))
-  if (!response.ok) throw new Error(body.error || `请求失败 (${response.status})`)
-  return body as T
+  const response = await fetch(`/api/v1${path}`, {
+    ...init,
+    headers: {
+      "Content-Type": "application/json",
+      ...csrfHeaders(),
+      ...init?.headers,
+    },
+  });
+  if (response.status === 401) window.location.assign("/auth/login");
+  const body = await response.json().catch(() => ({}));
+  if (!response.ok)
+    throw new Error(body.error || `请求失败 (${response.status})`);
+  return body as T;
 }
 
 export const api = {
-  status: () => request<Status>('/status'),
-  projects: () => request<Project[]>('/projects'),
-  sources: () => request<Source[]>('/sources'),
-  runs: (limit = 200, source?: string) => request<SyncRun[]>(`/sync/runs?limit=${limit}${source ? `&source=${encodeURIComponent(source)}` : ''}`),
-  sync: (sourceId?: string) => request<SyncRun | SyncRun[]>('/sync', { method: 'POST', body: JSON.stringify({ sourceId }) }),
-  search: (params: URLSearchParams) => request<SearchHit[]>(`/search?${params}`),
-  memory: (id: string) => request<MemoryRecord>(`/memories/${encodeURIComponent(id)}`),
-  doctor: () => request<Doctor>('/index/doctor'),
-  rebuild: () => request<{rebuilt: boolean; documents: number}>('/index/rebuild', { method: 'POST' }),
-  config: () => request<ConfigData>('/config'),
-  validateConfig: (raw: string) => request<{valid: boolean; actions: RegistryAction[]}>('/config/validate', { method: 'POST', body: JSON.stringify({ raw }) }),
-  saveConfig: (raw: string, expectedHash: string) => request<{saved: boolean; hash: string; actions: RegistryAction[]}>('/config', { method: 'PUT', body: JSON.stringify({ raw, expectedHash }) }),
-}
+  status: () => request<Status>("/status"),
+  projects: () => request<Project[]>("/projects"),
+  sources: () => request<Source[]>("/sources"),
+  runs: (limit = 200, source?: string) =>
+    request<SyncRun[]>(
+      `/sync/runs?limit=${limit}${source ? `&source=${encodeURIComponent(source)}` : ""}`,
+    ),
+  sync: (sourceId?: string) =>
+    request<SyncRun | SyncRun[]>("/sync", {
+      method: "POST",
+      body: JSON.stringify({ sourceId }),
+    }),
+  upload: (batch: unknown) =>
+    request<{
+      batchId: string;
+      version: number;
+      replayed: boolean;
+      indexPending: boolean;
+    }>("/uploads", { method: "POST", body: JSON.stringify(batch) }),
+  search: (params: URLSearchParams) =>
+    request<SearchHit[]>(`/search?${params}`),
+  memory: (id: string) =>
+    request<MemoryRecord>(`/memories/${encodeURIComponent(id)}`),
+  doctor: () => request<Doctor>("/index/doctor"),
+  rebuild: () =>
+    request<{ rebuilt: boolean; documents: number }>("/index/rebuild", {
+      method: "POST",
+    }),
+  config: () => request<ConfigData>("/config"),
+  validateConfig: (raw: string) =>
+    request<{ valid: boolean; actions: RegistryAction[] }>("/config/validate", {
+      method: "POST",
+      body: JSON.stringify({ raw }),
+    }),
+  saveConfig: (raw: string, expectedHash: string) =>
+    request<{ saved: boolean; hash: string; actions: RegistryAction[] }>(
+      "/config",
+      { method: "PUT", body: JSON.stringify({ raw, expectedHash }) },
+    ),
+};

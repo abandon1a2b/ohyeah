@@ -1,0 +1,16 @@
+name: ohyeah-oidc-demo
+services:
+  identity:
+    image: quay.io/keycloak/keycloak:26.8.0
+    command: [start-dev, --import-realm]
+    environment:
+      KC_BOOTSTRAP_ADMIN_USERNAME: demo-admin
+      KC_BOOTSTRAP_ADMIN_PASSWORD: demo-admin-only-local
+      KC_HOSTNAME: http://127.0.0.1:18080
+    ports:
+      - "127.0.0.1:18080:8080"
+    volumes:
+      - ./ohyeah-realm.json:/opt/keycloak/data/import/ohyeah-realm.json:ro
+      - identity-data:/opt/keycloak/data
+volumes:
+  identity-data:

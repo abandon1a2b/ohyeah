@@ -9,6 +9,14 @@ import { Separator } from "@/components/ui/separator";
 import { Switch } from "@/components/ui/switch";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
+import {
+  Select,
+  SelectTrigger,
+  SelectValue,
+  SelectContent,
+  SelectGroup,
+  SelectItem,
+} from "@/components/ui/select";
 import type { ConfigData, RegistryAction, Source } from "../types";
 
 type ConfigMap = any;
@@ -268,23 +276,55 @@ function StructuredEditor({
                   />
                 </div>
                 <FieldGroup className="grid gap-4 sm:grid-cols-3">
-                  <TextField
-                    label="Collector command"
-                    value={type.collector?.command || ""}
-                    onChange={(value) =>
-                      update(
-                        [
-                          "projects",
-                          projectId,
-                          "types",
-                          typeId,
-                          "collector",
-                          "command",
-                        ],
-                        value,
-                      )
-                    }
-                  />
+                  <Field>
+                    <FieldLabel>采集方式</FieldLabel>
+                    <Select
+                      value={type.collector?.mode || "command"}
+                      onValueChange={(mode) => {
+                        const next = structuredClone(type);
+                        next.collector = { ...next.collector, mode };
+                        if (mode === "upload") {
+                          delete next.collector.command;
+                          delete next.collector.args;
+                        } else {
+                          for (const mount of Object.values(
+                            next.mounts || {},
+                          ) as ConfigMap[])
+                            delete mount.writer;
+                        }
+                        update(["projects", projectId, "types", typeId], next);
+                      }}
+                    >
+                      <SelectTrigger className="w-full">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectGroup>
+                          <SelectItem value="command">中央执行</SelectItem>
+                          <SelectItem value="upload">远程上传</SelectItem>
+                        </SelectGroup>
+                      </SelectContent>
+                    </Select>
+                  </Field>
+                  {type.collector?.mode !== "upload" && (
+                    <TextField
+                      label="Collector command"
+                      value={type.collector?.command || ""}
+                      onChange={(value) =>
+                        update(
+                          [
+                            "projects",
+                            projectId,
+                            "types",
+                            typeId,
+                            "collector",
+                            "command",
+                          ],
+                          value,
+                        )
+                      }
+                    />
+                  )}
                   <TextField
                     label="Revision"
                     type="number"
@@ -303,23 +343,25 @@ function StructuredEditor({
                       )
                     }
                   />
-                  <TextField
-                    label="Timeout"
-                    value={type.collector?.timeout || ""}
-                    onChange={(value) =>
-                      update(
-                        [
-                          "projects",
-                          projectId,
-                          "types",
-                          typeId,
-                          "collector",
-                          "timeout",
-                        ],
-                        value,
-                      )
-                    }
-                  />
+                  {type.collector?.mode !== "upload" && (
+                    <TextField
+                      label="Timeout"
+                      value={type.collector?.timeout || ""}
+                      onChange={(value) =>
+                        update(
+                          [
+                            "projects",
+                            projectId,
+                            "types",
+                            typeId,
+                            "collector",
+                            "timeout",
+                          ],
+                          value,
+                        )
+                      }
+                    />
+                  )}
                 </FieldGroup>
                 <div className="divide-y border-y">
                   {Object.entries(type.mounts || {}).map(
@@ -384,32 +426,30 @@ function StructuredEditor({
                               )
                             }
                           />
-                          <TextField
-                            label="监听扩展名"
-                            value={mount.options?.watch_extensions || ""}
-                            onChange={(value) =>
-                              update(
-                                [
-                                  "projects",
-                                  projectId,
-                                  "types",
-                                  typeId,
-                                  "mounts",
-                                  mountId,
-                                  "options",
-                                  "watch_extensions",
-                                ],
-                                value,
-                              )
-                            }
-                          />
-                          <Field className="justify-end">
-                            <Toggle
-                              checked={
-                                mount.options?.watch === true ||
-                                mount.options?.watch === "true"
+                          {type.collector?.mode === "upload" && (
+                            <TextField
+                              label="写入账号"
+                              value={mount.writer || ""}
+                              onChange={(value) =>
+                                update(
+                                  [
+                                    "projects",
+                                    projectId,
+                                    "types",
+                                    typeId,
+                                    "mounts",
+                                    mountId,
+                                    "writer",
+                                  ],
+                                  value,
+                                )
                               }
-                              label="文件监听"
+                            />
+                          )}
+                          {type.collector?.mode !== "upload" && (
+                            <TextField
+                              label="监听扩展名"
+                              value={mount.options?.watch_extensions || ""}
                               onChange={(value) =>
                                 update(
                                   [
@@ -420,13 +460,39 @@ function StructuredEditor({
                                     "mounts",
                                     mountId,
                                     "options",
-                                    "watch",
+                                    "watch_extensions",
                                   ],
                                   value,
                                 )
                               }
                             />
-                          </Field>
+                          )}
+                          {type.collector?.mode !== "upload" && (
+                            <Field className="justify-end">
+                              <Toggle
+                                checked={
+                                  mount.options?.watch === true ||
+                                  mount.options?.watch === "true"
+                                }
+                                label="文件监听"
+                                onChange={(value) =>
+                                  update(
+                                    [
+                                      "projects",
+                                      projectId,
+                                      "types",
+                                      typeId,
+                                      "mounts",
+                                      mountId,
+                                      "options",
+                                      "watch",
+                                    ],
+                                    value,
+                                  )
+                                }
+                              />
+                            </Field>
+                          )}
                         </FieldGroup>
                       </div>
                     ),

@@ -17,6 +17,7 @@ type AuditEvent struct {
 	Resource     string          `json:"resource"`
 	Status       int             `json:"status"`
 	Details      json.RawMessage `json:"details"`
+	ActorKind    string          `json:"actorKind"`
 }
 
 func (s *Store) StartAudit(ctx context.Context, e AuditEvent) (int64, error) {
@@ -43,7 +44,7 @@ func (s *Store) ListAudit(ctx context.Context, issuer, subject string, all bool,
 	if limit <= 0 || limit > 200 {
 		limit = 50
 	}
-	rows, err := s.db.QueryContext(ctx, `SELECT id,occurred_at,issuer,subject,credential_id,action,resource,status,details FROM audit_events WHERE issuer=? AND (subject=? OR ?) AND (?=0 OR id<?) ORDER BY id DESC LIMIT ?`, issuer, subject, all, before, before, limit)
+	rows, err := s.db.QueryContext(ctx, `SELECT id,occurred_at,issuer,subject,credential_id,action,resource,status,details,actor_kind FROM audit_events WHERE issuer=? AND ((subject=? AND actor_kind='principal') OR ?) AND (?=0 OR id<?) ORDER BY id DESC LIMIT ?`, issuer, subject, all, before, before, limit)
 	if err != nil {
 		return nil, err
 	}
@@ -52,7 +53,7 @@ func (s *Store) ListAudit(ctx context.Context, issuer, subject string, all bool,
 	for rows.Next() {
 		var e AuditEvent
 		var details string
-		if err := rows.Scan(&e.ID, &e.OccurredAt, &e.Issuer, &e.Subject, &e.CredentialID, &e.Action, &e.Resource, &e.Status, &details); err != nil {
+		if err := rows.Scan(&e.ID, &e.OccurredAt, &e.Issuer, &e.Subject, &e.CredentialID, &e.Action, &e.Resource, &e.Status, &details, &e.ActorKind); err != nil {
 			return nil, err
 		}
 		e.Details = json.RawMessage(details)
