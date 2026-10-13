@@ -13,29 +13,6 @@ import (
 	"github.com/abandon1a2b/ohyeah/pkg/collector"
 )
 
-func (s *Store) migrateCentral(ctx context.Context) error {
-	tx, err := s.db.BeginTx(ctx, nil)
-	if err != nil {
-		return err
-	}
-	defer tx.Rollback()
-	_, err = tx.ExecContext(ctx, `
-CREATE TABLE IF NOT EXISTS upload_state(source_id TEXT PRIMARY KEY REFERENCES sources(id) ON DELETE CASCADE, version INTEGER NOT NULL DEFAULT 0);
-CREATE TABLE IF NOT EXISTS upload_batches(source_id TEXT NOT NULL REFERENCES sources(id) ON DELETE CASCADE, batch_id TEXT NOT NULL, request_hash TEXT NOT NULL, receipt_json TEXT NOT NULL, PRIMARY KEY(source_id,batch_id));
-CREATE TABLE IF NOT EXISTS audit_events(id INTEGER PRIMARY KEY AUTOINCREMENT, occurred_at INTEGER NOT NULL, issuer TEXT NOT NULL, subject TEXT NOT NULL, credential_id TEXT NOT NULL, action TEXT NOT NULL, resource TEXT NOT NULL, status INTEGER NOT NULL, details TEXT NOT NULL DEFAULT '{}');
-CREATE INDEX IF NOT EXISTS idx_audit_subject ON audit_events(issuer,subject,id DESC);
-CREATE TABLE IF NOT EXISTS auth_principals(issuer TEXT NOT NULL, subject TEXT NOT NULL, policy_json TEXT NOT NULL, version INTEGER NOT NULL, PRIMARY KEY(issuer,subject));
-UPDATE schema_versions SET version=6, updated_at=CURRENT_TIMESTAMP WHERE component='store';
-PRAGMA user_version=6;`)
-	if err != nil {
-		return err
-	}
-	if err := tx.Commit(); err != nil {
-		return err
-	}
-	return s.migrateIdentity(ctx)
-}
-
 var ErrUploadConflict = errors.New("upload version, scope, or batch ID conflict; prepare a new batch from current source state")
 var ErrUploadSource = errors.New("source is not an active upload source owned by this writer")
 

@@ -61,7 +61,7 @@ func Open(path string) (*Store, error) {
 		}
 	}
 	s := &Store{db: db}
-	if err := s.migrate(context.Background()); err != nil {
+	if err := s.initialize(context.Background()); err != nil {
 		db.Close()
 		return nil, err
 	}
@@ -70,45 +70,21 @@ func Open(path string) (*Store, error) {
 
 func (s *Store) Close() error { return s.db.Close() }
 
-func (s *Store) migrate(ctx context.Context) error {
-	var version int
-	if err := s.db.QueryRowContext(ctx, `PRAGMA user_version`).Scan(&version); err != nil {
+const schemaVersion = 8
+
+func (s *Store) initialize(ctx context.Context) error {
+	var version, tables int
+	if err := s.db.QueryRowContext(ctx, `SELECT user_version, (SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%') FROM pragma_user_version`).Scan(&version, &tables); err != nil {
 		return err
 	}
-	if version > 8 {
-		return fmt.Errorf("state database schema version %d is newer than this ohyeah binary", version)
-	}
-	if version == 8 {
+	if version == schemaVersion {
 		return nil
 	}
-	if version == 6 || version == 7 {
-		return s.migrateIdentity(ctx)
+	if version != 0 {
+		return fmt.Errorf("unsupported state database schema version %d (expected %d); pre-release database migrations are not supported; use a new state.path", version, schemaVersion)
 	}
-	if version == 5 {
-		return s.migrateCentral(ctx)
-	}
-	if version == 4 {
-		return s.migrateAuth(ctx)
-	}
-	if version == 3 {
-		tx, err := s.db.BeginTx(ctx, nil)
-		if err != nil {
-			return err
-		}
-		defer tx.Rollback()
-		if _, err := tx.ExecContext(ctx, `CREATE INDEX IF NOT EXISTS idx_sync_runs_source_id ON sync_runs(source_id, id DESC)`); err != nil {
-			return err
-		}
-		if _, err := tx.ExecContext(ctx, `UPDATE schema_versions SET version=4, updated_at=CURRENT_TIMESTAMP WHERE component='store'`); err != nil {
-			return err
-		}
-		if _, err := tx.ExecContext(ctx, `PRAGMA user_version=4`); err != nil {
-			return err
-		}
-		if err := tx.Commit(); err != nil {
-			return err
-		}
-		return s.migrateAuth(ctx)
+	if tables != 0 {
+		return errors.New("unversioned state database is not empty; use a new state.path")
 	}
 	const schema = `
 CREATE TABLE IF NOT EXISTS projects (
@@ -224,62 +200,37 @@ CREATE TABLE IF NOT EXISTS index_outbox (
     delivered_at TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_outbox_pending ON index_outbox(delivered_at, id);
+
+CREATE TABLE IF NOT EXISTS auth_credentials (
+ id TEXT PRIMARY KEY, token_hash TEXT UNIQUE NOT NULL, subject TEXT NOT NULL, issuer TEXT NOT NULL,
+ kind TEXT NOT NULL, name TEXT NOT NULL, expires_at INTEGER NOT NULL, created_at INTEGER NOT NULL, last_used_at INTEGER NOT NULL DEFAULT 0
+);
+CREATE TABLE IF NOT EXISTS auth_flows (
+ key TEXT PRIMARY KEY, kind TEXT NOT NULL, payload TEXT NOT NULL, subject TEXT NOT NULL DEFAULT '', expires_at INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_auth_flows_expiry ON auth_flows(expires_at);
+
+CREATE TABLE IF NOT EXISTS upload_state(source_id TEXT PRIMARY KEY REFERENCES sources(id) ON DELETE CASCADE, version INTEGER NOT NULL DEFAULT 0);
+CREATE TABLE IF NOT EXISTS upload_batches(source_id TEXT NOT NULL REFERENCES sources(id) ON DELETE CASCADE, batch_id TEXT NOT NULL, request_hash TEXT NOT NULL, receipt_json TEXT NOT NULL, PRIMARY KEY(source_id,batch_id));
+CREATE TABLE IF NOT EXISTS audit_events(id INTEGER PRIMARY KEY AUTOINCREMENT, occurred_at INTEGER NOT NULL, issuer TEXT NOT NULL, subject TEXT NOT NULL, credential_id TEXT NOT NULL, actor_kind TEXT NOT NULL DEFAULT 'principal', action TEXT NOT NULL, resource TEXT NOT NULL, status INTEGER NOT NULL, details TEXT NOT NULL DEFAULT '{}');
+CREATE INDEX IF NOT EXISTS idx_audit_subject ON audit_events(issuer,subject,id DESC);
+CREATE TABLE IF NOT EXISTS auth_principals(issuer TEXT NOT NULL, subject TEXT NOT NULL, policy_json TEXT NOT NULL, version INTEGER NOT NULL, PRIMARY KEY(issuer,subject));
+CREATE INDEX IF NOT EXISTS idx_audit_issuer_id ON audit_events(issuer,id DESC);
 CREATE TABLE IF NOT EXISTS schema_versions (
     component TEXT PRIMARY KEY,
     version INTEGER NOT NULL,
     updated_at TEXT NOT NULL
 );
 INSERT INTO schema_versions(component, version, updated_at)
-VALUES ('store', 4, CURRENT_TIMESTAMP)
+VALUES ('store', 8, CURRENT_TIMESTAMP)
 ON CONFLICT(component) DO UPDATE SET version=excluded.version, updated_at=excluded.updated_at;
+PRAGMA user_version=8;
 `
-	if _, err := s.db.ExecContext(ctx, schema); err != nil {
-		return err
-	}
-	if err := s.ensureColumn(ctx, "sources", "cursor_json", `TEXT NOT NULL DEFAULT ''`); err != nil {
-		return err
-	}
-	if err := s.migrateSourceConfigColumns(ctx); err != nil {
-		return err
-	}
-	if err := s.ensureColumn(ctx, "memory_units", "project_id", `TEXT NOT NULL DEFAULT ''`); err != nil {
-		return err
-	}
-	if err := s.ensureColumn(ctx, "memory_units", "type_id", `TEXT NOT NULL DEFAULT ''`); err != nil {
-		return err
-	}
-	if err := s.ensureColumn(ctx, "memory_units", "mount_id", `TEXT NOT NULL DEFAULT ''`); err != nil {
-		return err
-	}
-	_, err := s.db.ExecContext(ctx, `PRAGMA user_version=4`)
-	if err != nil {
-		return err
-	}
-	return s.migrateAuth(ctx)
-}
 
-func (s *Store) migrateSourceConfigColumns(ctx context.Context) error {
-	columns := []struct {
-		name       string
-		definition string
-	}{
-		{"project_id", `TEXT NOT NULL DEFAULT ''`},
-		{"project_workspace", `TEXT NOT NULL DEFAULT ''`},
-		{"type_id", `TEXT NOT NULL DEFAULT ''`},
-		{"mount_name", `TEXT NOT NULL DEFAULT ''`},
-		{"managed_by", `TEXT NOT NULL DEFAULT 'cli'`},
-		{"state", `TEXT NOT NULL DEFAULT 'active'`},
-		{"type_config_hash", `TEXT NOT NULL DEFAULT ''`},
-		{"mount_config_hash", `TEXT NOT NULL DEFAULT ''`},
-		{"type_revision", `INTEGER NOT NULL DEFAULT 0`},
-		{"mount_revision", `INTEGER NOT NULL DEFAULT 0`},
-	}
-	for _, column := range columns {
-		if err := s.ensureColumn(ctx, "sources", column.name, column.definition); err != nil {
-			return err
-		}
-	}
-	return nil
+	return s.withTx(ctx, func(tx *sql.Tx) error {
+		_, err := tx.ExecContext(ctx, schema)
+		return err
+	})
 }
 
 func (s *Store) UpsertSource(ctx context.Context, source model.Source) error {
@@ -1131,35 +1082,6 @@ func (s *Store) withTx(ctx context.Context, fn func(*sql.Tx) error) error {
 		return err
 	}
 	return tx.Commit()
-}
-
-func (s *Store) ensureColumn(ctx context.Context, table, column, definition string) error {
-	rows, err := s.db.QueryContext(ctx, `PRAGMA table_info(`+table+`)`)
-	if err != nil {
-		return err
-	}
-	found := false
-	for rows.Next() {
-		var cid int
-		var name, dataType string
-		var notNull, primaryKey int
-		var defaultValue any
-		if err := rows.Scan(&cid, &name, &dataType, &notNull, &defaultValue, &primaryKey); err != nil {
-			rows.Close()
-			return err
-		}
-		if name == column {
-			found = true
-		}
-	}
-	if err := rows.Close(); err != nil {
-		return err
-	}
-	if found {
-		return nil
-	}
-	_, err = s.db.ExecContext(ctx, `ALTER TABLE `+table+` ADD COLUMN `+column+` `+definition)
-	return err
 }
 
 func boolInt(value bool) int {

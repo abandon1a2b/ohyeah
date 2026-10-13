@@ -70,6 +70,8 @@
 
 SQLite 负责保存 project/type/mount 层级、解析后的 memory unit、纠错关系、同步运行记录，以及可恢复的索引 outbox。Meilisearch 只是可替换的检索后端，可以完全从本地 SQLite 数据重建。
 
+项目尚未正式发布，暂不提供历史数据库迁移。新数据库直接创建完整 schema；已有数据库只接受当前 schema 版本。不支持的版本会明确报错，请使用新的 `state.path` 并重新采集，程序不会自动删除旧数据。
+
 采集逻辑与 `ohyeah` 二进制解耦。任何受信任的可执行文件都可以实现版本化 collector 协议，并通过 `command` driver 注册。
 
 `ohyeah` 有意不内置特定内容的 collector。Markdown 整理、Codex 会话选择、内部系统接入以及未来的来源逻辑，都应放在独立维护的 collector 扩展中。核心只负责校验输出、保存同步状态和游标、投递索引 outbox，并应用协议中声明的纠错与 provenance 关系。

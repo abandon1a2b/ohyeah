@@ -8,32 +8,6 @@ import (
 	"time"
 )
 
-func (s *Store) migrateAuth(ctx context.Context) error {
-	tx, err := s.db.BeginTx(ctx, nil)
-	if err != nil {
-		return err
-	}
-	defer tx.Rollback()
-	_, err = tx.ExecContext(ctx, `
-CREATE TABLE IF NOT EXISTS auth_credentials (
- id TEXT PRIMARY KEY, token_hash TEXT UNIQUE NOT NULL, subject TEXT NOT NULL, issuer TEXT NOT NULL,
- kind TEXT NOT NULL, name TEXT NOT NULL, expires_at INTEGER NOT NULL, created_at INTEGER NOT NULL
-);
-CREATE TABLE IF NOT EXISTS auth_flows (
- key TEXT PRIMARY KEY, kind TEXT NOT NULL, payload TEXT NOT NULL, subject TEXT NOT NULL DEFAULT '', expires_at INTEGER NOT NULL
-);
-CREATE INDEX IF NOT EXISTS idx_auth_flows_expiry ON auth_flows(expires_at);
-UPDATE schema_versions SET version=5, updated_at=CURRENT_TIMESTAMP WHERE component='store';
-PRAGMA user_version=5;`)
-	if err != nil {
-		return err
-	}
-	if err := tx.Commit(); err != nil {
-		return err
-	}
-	return s.migrateCentral(ctx)
-}
-
 type Credential struct {
 	ID         string `json:"id"`
 	Subject    string `json:"subject"`
