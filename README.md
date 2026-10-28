@@ -86,7 +86,7 @@ make build
 
 已提交的 `internal/web/dist` 允许直接执行 `go build -o ohyeah .`；发布构建应使用 `make build`，确保前端源码与嵌入资源一致。
 
-Web UI 使用 shadcn/ui 的 Nova 风格组件和 `dashboard-01` 模板布局。组件源码位于 `src/components/ui`，主题变量在 `src/styles.css`，通过 `npx shadcn@latest add <component>` 按需添加组件。修改页面后运行 `make build`，让 `./ohyeah serve` 使用最新嵌入式资源。
+Web UI 使用 shadcn/ui 的 Nova 风格组件和 `dashboard-01` 模板布局。组件源码位于 `src/components/ui`，主题变量在 `src/styles.css`，通过显式运行 shadcn CLI 按需添加组件。构建所需的静态样式已随许可存入 `src/styles/vendor`，构建不依赖 CLI。修改页面后运行 `make build`，让 `./ohyeah serve` 使用最新嵌入式资源。
 
 第一次使用时，直接启动完整服务：
 
@@ -316,3 +316,15 @@ go test ./internal/cli -run TestRealServiceLifecycle -v -count=1
 目前的第一条 vertical slice 已支持：外部 command collector、版本化请求、snapshot/delta 完成语义、持久化游标、source 原子提交、可恢复的 Meilisearch 索引、纠错抑制、project/type/mount 配置、dry-run、隔离的 mount 失败、持续调用，以及保留 provenance 的裁剪搜索结果。
 
 下一里程碑是建立历史问题评测集。后续新增抽取或排序功能，只有在不增加误导性结果的前提下，能够用数据证明其改善了正确最终结论的检索效果，才应被接受。
+
+## 维护与可复现构建
+
+构建工具链以 `go.mod`、`.node-version` 和 `package.json` 的 `packageManager` 为准。首次构建前运行 `npm ci`，使用已提交的锁文件安装依赖。`make check`（也可使用 `make test`）统一运行 TypeScript 检查、Go 静态检查和竞态测试。CI 重新构建前端，并检查嵌入资源与已提交源码是否一致。
+
+项目、类型和挂载点变更无需重启；服务、认证、搜索引擎及全局同步设置需要重启。配置 API 的 `restartRequired` 返回待重启的配置分组，Web UI 持续显示提示。保存文件与 SQLite 应用不是跨资源事务：保存成功后若应用失败，接口明确报错，后续 reload 可重试应用。
+
+模块边界、配置生效语义与后续数据迁移约定见[维护指南](docs/maintenance.md)。
+
+当前状态库为 schema 9，正式程序不保留迁移代码。离线备份与完整性检查使用 `state backup` / `state check`；`state prune` 默认预览清理，设置 `--dry-run=false` 才执行。服务按配置定期清理已完成 outbox 和同步历史，审计与上传回执默认永久保留。`serve` 运行时使用 HTTP 客户端，本机 Go CLI 的状态操作需要先停止服务。
+
+`make contracts` 生成前端类型及 JSON Schema；`make audit` 检查依赖；`make e2e` 使用独立临时数据库和真实 Meilisearch 运行浏览器回归。完整流程见维护指南。

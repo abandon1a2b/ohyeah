@@ -41,14 +41,14 @@ func (m *Meilisearch) ResetVectors(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	return m.wait(task.TaskUID)
+	return m.wait(ctx, task.TaskUID)
 }
 
 func (m *Meilisearch) EnsureVectors(ctx context.Context) error {
 	if !m.embedding.Enabled {
 		return fmt.Errorf("embedding is disabled")
 	}
-	if _, err := m.client.GetIndex(m.vectorIndex()); err != nil {
+	if _, err := m.client.GetIndexWithContext(ctx, m.vectorIndex()); err != nil {
 		if !isNotFound(err) {
 			return err
 		}
@@ -94,7 +94,7 @@ func (m *Meilisearch) DeleteVectors(ctx context.Context, ids []string) error {
 	if err != nil {
 		return err
 	}
-	return m.wait(task.TaskUID)
+	return m.wait(ctx, task.TaskUID)
 }
 
 func (m *Meilisearch) embed(ctx context.Context, texts []string) ([][]float32, error) {
@@ -133,18 +133,14 @@ func (m *Meilisearch) embed(ctx context.Context, texts []string) ([][]float32, e
 	return result.Embeddings, nil
 }
 
-func (m *Meilisearch) UpsertVectors(ctx context.Context, payloads [][]byte) error {
+func (m *Meilisearch) UpsertVectors(ctx context.Context, payloads []model.MemoryUnit) error {
 	texts := make([]string, 0, len(payloads))
-	documents := make([]map[string]any, 0, len(payloads))
-	for _, payload := range payloads {
-		var unit model.MemoryUnit
-		var document map[string]any
-		if err := json.Unmarshal(payload, &unit); err != nil {
-			return err
-		}
-		if err := json.Unmarshal(payload, &document); err != nil {
-			return err
-		}
+	type vectorDocument struct {
+		model.MemoryUnit
+		Vectors map[string][]float32 `json:"_vectors"`
+	}
+	documents := make([]vectorDocument, 0, len(payloads))
+	for _, unit := range payloads {
 		text := unit.Title + "\n" + unit.Content
 		if len(text) > m.embedding.DocumentTemplateMaxBytes {
 			text = text[:m.embedding.DocumentTemplateMaxBytes]
@@ -153,7 +149,7 @@ func (m *Meilisearch) UpsertVectors(ctx context.Context, payloads [][]byte) erro
 			}
 		}
 		texts = append(texts, strings.TrimSpace(text))
-		documents = append(documents, document)
+		documents = append(documents, vectorDocument{MemoryUnit: unit})
 	}
 	if len(texts) == 0 {
 		return nil
@@ -163,11 +159,11 @@ func (m *Meilisearch) UpsertVectors(ctx context.Context, payloads [][]byte) erro
 		return err
 	}
 	for i := range documents {
-		documents[i]["_vectors"] = map[string]any{m.embedding.Name: vectors[i]}
+		documents[i].Vectors = map[string][]float32{m.embedding.Name: vectors[i]}
 	}
 	task, err := m.client.Index(m.vectorIndex()).AddDocumentsWithContext(ctx, documents, nil)
 	if err != nil {
 		return err
 	}
-	return m.wait(task.TaskUID)
+	return m.wait(ctx, task.TaskUID)
 }

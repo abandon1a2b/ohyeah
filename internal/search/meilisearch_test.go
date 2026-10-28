@@ -109,11 +109,11 @@ func TestQwenIntegration(t *testing.T) {
 	t.Cleanup(func() {
 		vectorTask, err := backend.client.DeleteIndex(backend.vectorIndex())
 		if err == nil {
-			_ = backend.wait(vectorTask.TaskUID)
+			_ = backend.wait(ctx, vectorTask.TaskUID)
 		}
 		task, err := backend.client.DeleteIndex(backend.index)
 		if err == nil {
-			err = backend.wait(task.TaskUID)
+			err = backend.wait(ctx, task.TaskUID)
 		}
 		if err != nil {
 			t.Errorf("cleanup index: %v", err)
@@ -130,17 +130,13 @@ func TestQwenIntegration(t *testing.T) {
 	if err != nil || len(embedders) != 0 {
 		t.Fatalf("primary index embedders = %#v, error = %v", embedders, err)
 	}
-	var payloads [][]byte
+	var payloads []model.MemoryUnit
 	for _, unit := range []model.MemoryUnit{
 		{ID: "db", ProjectID: "test", Title: "Database pool", Content: "Requests time out because database connections are exhausted. Close unused connections.", OccurredAt: time.Now()},
 		{ID: "css", ProjectID: "test", Title: "Mobile layout", Content: "Wrap long button labels on small screens.", OccurredAt: time.Now()},
 		{ID: "other", ProjectID: "other", Title: "Database pool", Content: "Requests time out because database connections are exhausted.", OccurredAt: time.Now()},
 	} {
-		payload, err := json.Marshal(unit)
-		if err != nil {
-			t.Fatal(err)
-		}
-		payloads = append(payloads, payload)
+		payloads = append(payloads, unit)
 	}
 	if err := backend.Upsert(ctx, payloads); err != nil {
 		t.Fatal(err)
@@ -284,5 +280,41 @@ func TestOptionalSearchRejectsStaleMetadata(t *testing.T) {
 				t.Fatalf("stale metadata accepted: hits=%#v error=%v", hits, err)
 			}
 		})
+	}
+}
+
+func TestIndexWriteCancelsTaskWait(t *testing.T) {
+	waiting := make(chan struct{})
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.Contains(r.URL.Path, "/documents") {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusAccepted)
+			fmt.Fprint(w, `{"taskUid":1}`)
+			return
+		}
+		close(waiting)
+		<-r.Context().Done()
+	}))
+	defer server.Close()
+	backend := NewMeilisearch(config.MeilisearchConfig{URL: server.URL, Index: "test"})
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	done := make(chan error, 1)
+	go func() { done <- backend.Upsert(ctx, []model.MemoryUnit{{ID: "one"}}) }()
+	select {
+	case <-waiting:
+	case err := <-done:
+		t.Fatalf("index write returned before polling: %v", err)
+	case <-time.After(3 * time.Second):
+		t.Fatal("task polling did not start")
+	}
+	cancel()
+	select {
+	case err := <-done:
+		if err == nil {
+			t.Fatal("cancelled task accepted")
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("index write ignored cancellation")
 	}
 }

@@ -62,3 +62,11 @@ projects:
             revision: 1
             options:
               scope: recent
+
+# Zero retention retains forever. Upload receipts are always retained so retries
+# cannot become new writes merely because time elapsed.
+maintenance:
+  interval: 24h
+  outbox_retention: 168h
+  sync_retention: 720h
+  audit_retention: 0s

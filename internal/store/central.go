@@ -17,7 +17,7 @@ var ErrUploadConflict = errors.New("upload version, scope, or batch ID conflict;
 var ErrUploadSource = errors.New("source is not an active upload source owned by this writer")
 
 func UploadScope(source model.Source) string {
-	writer, _ := source.Options["__ohyeah_writer"].(string)
+	writer := source.Writer
 	return identity.Hash(source.TypeConfigHash, source.MountConfigHash, source.Driver, source.Path, source.ProjectWorkspace, writer, strconv.Itoa(source.TypeRevision), strconv.Itoa(source.MountRevision))
 }
 
@@ -31,12 +31,9 @@ type UploadState struct {
 func (s *Store) UploadState(ctx context.Context, source model.Source) (UploadState, error) {
 	result := UploadState{SourceID: source.ID}
 	var current model.Source
-	var options, cursor string
-	err := s.db.QueryRowContext(ctx, `SELECT COALESCE(u.version,0),s.cursor_json,s.type_config_hash,s.mount_config_hash,s.type,s.path,s.project_workspace,s.options_json,s.type_revision,s.mount_revision FROM sources s LEFT JOIN upload_state u ON u.source_id=s.id WHERE s.id=?`, source.ID).Scan(&result.Version, &cursor, &current.TypeConfigHash, &current.MountConfigHash, &current.Driver, &current.Path, &current.ProjectWorkspace, &options, &current.TypeRevision, &current.MountRevision)
+	var cursor string
+	err := s.db.QueryRowContext(ctx, `SELECT COALESCE(u.version,0),s.cursor_json,s.type_config_hash,s.mount_config_hash,s.type,s.path,s.project_workspace,s.writer,s.type_revision,s.mount_revision FROM sources s LEFT JOIN upload_state u ON u.source_id=s.id WHERE s.id=?`, source.ID).Scan(&result.Version, &cursor, &current.TypeConfigHash, &current.MountConfigHash, &current.Driver, &current.Path, &current.ProjectWorkspace, &current.Writer, &current.TypeRevision, &current.MountRevision)
 	if err != nil {
-		return result, err
-	}
-	if err := json.Unmarshal([]byte(options), &current.Options); err != nil {
 		return result, err
 	}
 	result.ScopeRevision = UploadScope(current)
@@ -56,14 +53,10 @@ func (s *Store) CommitUpload(ctx context.Context, subject, issuer, credential st
 			return err
 		}
 		var current model.Source
-		var options string
-		if err := tx.QueryRowContext(ctx, `SELECT type,enabled,state,options_json,type_config_hash,mount_config_hash,path,project_workspace,type_revision,mount_revision FROM sources WHERE id=?`, batch.SourceID).Scan(&current.Driver, &current.Enabled, &current.State, &options, &current.TypeConfigHash, &current.MountConfigHash, &current.Path, &current.ProjectWorkspace, &current.TypeRevision, &current.MountRevision); err != nil {
+		if err := tx.QueryRowContext(ctx, `SELECT type,enabled,state,writer,type_config_hash,mount_config_hash,path,project_workspace,type_revision,mount_revision FROM sources WHERE id=?`, batch.SourceID).Scan(&current.Driver, &current.Enabled, &current.State, &current.Writer, &current.TypeConfigHash, &current.MountConfigHash, &current.Path, &current.ProjectWorkspace, &current.TypeRevision, &current.MountRevision); err != nil {
 			return err
 		}
-		if err := json.Unmarshal([]byte(options), &current.Options); err != nil {
-			return err
-		}
-		writer, _ := current.Options["__ohyeah_writer"].(string)
+		writer := current.Writer
 		if current.Driver != model.DriverUpload || !current.Enabled || current.State != model.SourceStateActive || writer != subject {
 			return ErrUploadSource
 		}

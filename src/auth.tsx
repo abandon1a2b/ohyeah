@@ -14,10 +14,7 @@ export type Identity = {
   tokenTTLSeconds?: number;
   credential?: { id: string; kind: string };
 };
-let csrf = "";
-export function csrfHeaders(): Record<string, string> {
-  return csrf ? { "X-CSRF-Token": csrf } : {};
-}
+import { csrfHeaders, setCSRF } from "./csrf";
 
 export function AuthGate({
   children,
@@ -52,7 +49,7 @@ export function AuthGate({
             : "身份服务不可用",
         );
       const identity: Identity = await me.json();
-      csrf = identity.csrf ?? "";
+      setCSRF(identity.csrf ?? "");
       if (active) setState({ ready: true, enabled: true, identity });
     }
     load().catch((error) => {

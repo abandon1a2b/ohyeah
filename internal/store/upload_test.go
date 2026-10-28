@@ -21,7 +21,7 @@ func uploadFixture(t *testing.T) (*Store, model.Source) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { s.Close() })
-	registered := model.Source{ID: "project/remote/node", ProjectID: "project", WorkspaceID: "project", TypeID: "remote", Path: "/remote", Driver: model.DriverUpload, Enabled: true, State: model.SourceStateActive, Options: map[string]any{"__ohyeah_writer": "alice"}, TypeRevision: 1, MountRevision: 1}
+	registered := model.Source{ID: "project/remote/node", ProjectID: "project", WorkspaceID: "project", TypeID: "remote", Path: "/remote", Driver: model.DriverUpload, Enabled: true, State: model.SourceStateActive, Writer: "alice", TypeRevision: 1, MountRevision: 1}
 	if err := s.UpsertSource(context.Background(), registered); err != nil {
 		t.Fatal(err)
 	}

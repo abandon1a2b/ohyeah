@@ -1,13 +1,11 @@
 package search
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
-	"reflect"
 	"slices"
 	"strings"
 	"time"
@@ -35,21 +33,21 @@ func (m *Meilisearch) Ensure(ctx context.Context) error {
 	if err := m.Healthy(ctx); err != nil {
 		return err
 	}
-	_, err := m.client.GetIndex(m.index)
+	_, err := m.client.GetIndexWithContext(ctx, m.index)
 	if err != nil {
 		if !isNotFound(err) {
 			return fmt.Errorf("get Meilisearch index: %w", err)
 		}
-		task, createErr := m.client.CreateIndex(&meilisearch.IndexConfig{Uid: m.index, PrimaryKey: "id"})
+		task, createErr := m.client.CreateIndexWithContext(ctx, &meilisearch.IndexConfig{Uid: m.index, PrimaryKey: "id"})
 		if createErr != nil {
 			return fmt.Errorf("create Meilisearch index: %w", createErr)
 		}
-		if err := m.wait(task.TaskUID); err != nil {
+		if err := m.wait(ctx, task.TaskUID); err != nil {
 			return err
 		}
 	}
 	index := m.client.Index(m.index)
-	current, err := index.GetSettings()
+	current, err := index.GetSettingsWithContext(ctx)
 	if err != nil {
 		return fmt.Errorf("get Meilisearch settings: %w", err)
 	}
@@ -62,17 +60,17 @@ func (m *Meilisearch) Ensure(ctx context.Context) error {
 		call   func() (*meilisearch.TaskInfo, error)
 	}{
 		{!slices.Equal(current.SearchableAttributes, searchable), "searchable attributes", func() (*meilisearch.TaskInfo, error) {
-			return index.UpdateSearchableAttributes(&searchable)
+			return index.UpdateSearchableAttributesWithContext(ctx, &searchable)
 		}},
 		{!slices.Equal(current.FilterableAttributes, filterable), "filterable attributes", func() (*meilisearch.TaskInfo, error) {
 			values := make([]interface{}, len(filterable))
 			for index, value := range filterable {
 				values[index] = value
 			}
-			return index.UpdateFilterableAttributes(&values)
+			return index.UpdateFilterableAttributesWithContext(ctx, &values)
 		}},
 		{!slices.Equal(current.SortableAttributes, sortable), "sortable attributes", func() (*meilisearch.TaskInfo, error) {
-			return index.UpdateSortableAttributes(&sortable)
+			return index.UpdateSortableAttributesWithContext(ctx, &sortable)
 		}},
 	}
 	for _, setting := range settings {
@@ -83,7 +81,7 @@ func (m *Meilisearch) Ensure(ctx context.Context) error {
 		if err != nil {
 			return fmt.Errorf("update %s: %w", setting.name, err)
 		}
-		if err := m.wait(task.TaskUID); err != nil {
+		if err := m.wait(ctx, task.TaskUID); err != nil {
 			return fmt.Errorf("update %s: %w", setting.name, err)
 		}
 	}
@@ -93,7 +91,7 @@ func (m *Meilisearch) Ensure(ctx context.Context) error {
 		if err != nil {
 			return err
 		}
-		if err := m.wait(task.TaskUID); err != nil {
+		if err := m.wait(ctx, task.TaskUID); err != nil {
 			return err
 		}
 	}
@@ -101,44 +99,43 @@ func (m *Meilisearch) Ensure(ctx context.Context) error {
 }
 
 func (m *Meilisearch) Reset(ctx context.Context) error {
-	_, err := m.client.GetIndex(m.index)
+	_, err := m.client.GetIndexWithContext(ctx, m.index)
 	if err != nil {
 		if isNotFound(err) {
 			return m.Ensure(ctx)
 		}
 		return err
 	}
-	task, err := m.client.DeleteIndex(m.index)
+	task, err := m.client.DeleteIndexWithContext(ctx, m.index)
 	if err != nil {
 		return err
 	}
-	if err := m.wait(task.TaskUID); err != nil {
+	if err := m.wait(ctx, task.TaskUID); err != nil {
 		return err
 	}
 	return m.Ensure(ctx)
 }
 
-func (m *Meilisearch) Upsert(ctx context.Context, payloads [][]byte) error {
+func (m *Meilisearch) Upsert(ctx context.Context, payloads []model.MemoryUnit) error {
 	if len(payloads) == 0 {
 		return nil
 	}
-	documents := bytes.Join(payloads, []byte("\n"))
-	task, err := m.client.Index(m.index).AddDocumentsNdjson(documents, nil)
+	task, err := m.client.Index(m.index).AddDocumentsWithContext(ctx, payloads, nil)
 	if err != nil {
 		return err
 	}
-	return m.wait(task.TaskUID)
+	return m.wait(ctx, task.TaskUID)
 }
 
 func (m *Meilisearch) Delete(ctx context.Context, ids []string) error {
 	if len(ids) == 0 {
 		return nil
 	}
-	task, err := m.client.Index(m.index).DeleteDocuments(ids, nil)
+	task, err := m.client.Index(m.index).DeleteDocumentsWithContext(ctx, ids, nil)
 	if err != nil {
 		return err
 	}
-	return m.wait(task.TaskUID)
+	return m.wait(ctx, task.TaskUID)
 }
 
 func (m *Meilisearch) Search(ctx context.Context, query model.SearchQuery) ([]model.SearchHit, error) {
@@ -241,7 +238,7 @@ func (m *Meilisearch) search(ctx context.Context, query model.SearchQuery) ([]mo
 			}
 			// Metadata changes do not necessarily change the content hash.
 			live.Content = ""
-			if !reflect.DeepEqual(live, unit) {
+			if !model.EqualIndexMetadata(live, unit) {
 				continue
 			}
 		}
@@ -295,9 +292,11 @@ func (m *Meilisearch) Count(ctx context.Context) (int64, bool, error) {
 }
 
 func (m *Meilisearch) Healthy(ctx context.Context) error {
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
 	deadline := time.Now().Add(5 * time.Second)
 	for {
-		health, err := m.client.Health()
+		health, err := m.client.HealthWithContext(ctx)
 		if err == nil && health.Status == "available" {
 			return nil
 		}
@@ -315,12 +314,12 @@ func (m *Meilisearch) Healthy(ctx context.Context) error {
 	}
 }
 
-func (m *Meilisearch) wait(taskID int64) error {
-	task, err := m.client.WaitForTask(taskID, 50*time.Millisecond)
+func (m *Meilisearch) wait(ctx context.Context, taskID int64) error {
+	task, err := m.client.WaitForTaskWithContext(ctx, taskID, 50*time.Millisecond)
 	if err != nil {
 		return err
 	}
-	if task.Status == meilisearch.TaskStatusFailed {
+	if task.Status != meilisearch.TaskStatusSucceeded {
 		return fmt.Errorf("Meilisearch task %d failed: %v", taskID, task.Error)
 	}
 	return nil

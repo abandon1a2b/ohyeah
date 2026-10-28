@@ -12,14 +12,14 @@ export function SectionCards({ status }: { status: Status | null }) {
   const cards = [
     {
       label: "记忆单元",
-      value: status?.stats.memoryUnits ?? 0,
+      value: status?.stats?.memoryUnits ?? 0,
       icon: FileText,
     },
-    { label: "数据来源", value: status?.stats.sources ?? 0, icon: BookOpen },
-    { label: "关联关系", value: status?.stats.relations ?? 0, icon: Activity },
+    { label: "数据来源", value: status?.stats?.sources ?? 0, icon: BookOpen },
+    { label: "关联关系", value: status?.stats?.relations ?? 0, icon: Activity },
     {
       label: "待处理索引",
-      value: status?.stats.pendingOutbox ?? 0,
+      value: status?.stats?.pendingOutbox ?? 0,
       icon: ListFilter,
     },
   ];

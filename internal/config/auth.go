@@ -7,6 +7,8 @@ import (
 	"net/url"
 	"strings"
 	"time"
+
+	"github.com/abandon1a2b/ohyeah/internal/model"
 )
 
 type AuthConfig struct {
@@ -24,16 +26,7 @@ type OIDCConfig struct {
 	ClientSecret string `mapstructure:"client_secret"`
 }
 
-type PrincipalConfig struct {
-	Subject       string   `mapstructure:"subject" json:"subject"`
-	Name          string   `mapstructure:"name" json:"name"`
-	Admin         bool     `mapstructure:"admin" json:"admin"`
-	Disabled      bool     `mapstructure:"disabled" json:"disabled"`
-	Projects      []string `mapstructure:"projects" json:"projects"`
-	SyncProjects  []string `mapstructure:"sync_projects" json:"syncProjects"`
-	SyncSources   []string `mapstructure:"sync_sources" json:"syncSources"`
-	UploadSources []string `mapstructure:"upload_sources" json:"uploadSources"`
-}
+type PrincipalConfig = model.Principal
 
 func SecureURL(raw string) bool {
 	u, err := url.Parse(raw)

@@ -1,6 +1,7 @@
 import { lazy, Suspense, useCallback, useEffect, useState } from "react";
 import { AuthGate, logout, type Identity } from "./auth";
 import { api } from "./api";
+import { useWorkspaceData } from "./hooks/use-workspace-data";
 import { Badge, Notice } from "./components";
 import { AppSidebar, navigation, type Page } from "@/components/app-sidebar";
 import { SiteHeader } from "@/components/site-header";
@@ -15,11 +16,11 @@ import {
 } from "@/components/ui/sheet";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
-import { ConfigPage } from "./pages/ConfigPage";
-import { Dashboard } from "./pages/Dashboard";
-import { IndexPage } from "./pages/IndexPage";
-import { SearchPage } from "./pages/SearchPage";
-import { SourcesPage } from "./pages/SourcesPage";
+const ConfigPage = lazy(() => import("./pages/ConfigPage").then((module) => ({ default: module.ConfigPage })));
+const Dashboard = lazy(() => import("./pages/Dashboard").then((module) => ({ default: module.Dashboard })));
+const IndexPage = lazy(() => import("./pages/IndexPage").then((module) => ({ default: module.IndexPage })));
+const SearchPage = lazy(() => import("./pages/SearchPage").then((module) => ({ default: module.SearchPage })));
+const SourcesPage = lazy(() => import("./pages/SourcesPage").then((module) => ({ default: module.SourcesPage })));
 import type {
   ConfigData,
   MemoryRecord,
@@ -38,16 +39,12 @@ const AccessPage = lazy(() =>
 );
 
 export default function App() {
-  return <AuthGate>{(identity) => <Workspace identity={identity} />}</AuthGate>;
+  return <Suspense fallback={<p role="status">加载中…</p>}><AuthGate>{(identity) => <Workspace identity={identity} />}</AuthGate></Suspense>;
 }
 
 function Workspace({ identity }: { identity: Identity | null }) {
   const admin = identity === null || identity.admin;
   const [page, setPage] = useState<Page>(admin ? "dashboard" : "search");
-  const [status, setStatus] = useState<Status | null>(null);
-  const [projects, setProjects] = useState<Project[]>([]);
-  const [sources, setSources] = useState<Source[]>([]);
-  const [runs, setRuns] = useState<SyncRun[]>([]);
   const [query, setQuery] = useState("");
   const [hits, setHits] = useState<SearchHit[]>([]);
   const [memory, setMemory] = useState<MemoryRecord | null>(null);
@@ -66,38 +63,8 @@ function Workspace({ identity }: { identity: Identity | null }) {
       setPage("search");
   }, [admin, page]);
 
-  const load = useCallback(
-    async (silent = false) => {
-      try {
-        const [s, p, src, r] = await Promise.all([
-          api.status(),
-          api.projects(),
-          api.sources(),
-          admin ? api.runs() : Promise.resolve([]),
-        ]);
-        setStatus(s);
-        setProjects(p);
-        setSources(src);
-        setRuns(
-          admin
-            ? r
-            : (
-                await Promise.all(src.map((source) => api.runs(1, source.id)))
-              ).flat(),
-        );
-      } catch (error) {
-        if (!silent)
-          setNotice({ kind: "error", text: (error as Error).message });
-      }
-    },
-    [admin],
-  );
-
-  useEffect(() => {
-    load();
-    const timer = setInterval(() => load(true), 10000);
-    return () => clearInterval(timer);
-  }, [load]);
+  const onLoadError = useCallback((error: Error) => setNotice({ kind: "error", text: error.message }), []);
+  const { status, projects, sources, runs, load } = useWorkspaceData(`${identity?.subject ?? "local"}:${admin}`, onLoadError);
 
   useEffect(() => {
     if (page === "config" && !config)
@@ -106,7 +73,7 @@ function Workspace({ identity }: { identity: Identity | null }) {
         .then((current) => {
           setConfig(current);
           setRaw(current.raw);
-          setActions(current.actions);
+          setActions(current.actions ?? []);
         })
         .catch((error) => setNotice({ kind: "error", text: error.message }));
   }, [page, config]);
@@ -161,12 +128,16 @@ function Workspace({ identity }: { identity: Identity | null }) {
     setBusy("validate");
     try {
       const result = await api.validateConfig(raw);
-      setActions(result.actions);
+      setActions(result.actions ?? []);
       setNotice({
-        kind: "success",
-        text: result.actions.length
-          ? `配置有效，检测到 ${result.actions.length} 项变更`
-          : "配置有效，运行状态已一致",
+        kind: result.valid ? "success" : "error",
+        text: !result.valid
+          ? "配置存在冲突，请检查变更计划"
+          : (result.restartRequired ?? []).length
+            ? `配置校验通过，以下配置保存后需重启：${(result.restartRequired ?? []).join("、")}`
+            : (result.actions ?? []).length
+              ? `配置有效，检测到 ${(result.actions ?? []).length} 项变更`
+              : "配置有效，运行状态已一致",
       });
     } catch (error) {
       setNotice({ kind: "error", text: (error as Error).message });
@@ -183,8 +154,13 @@ function Workspace({ identity }: { identity: Identity | null }) {
       const current = await api.config();
       setConfig(current);
       setRaw(current.raw);
-      setActions(current.actions);
-      setNotice({ kind: "success", text: "配置已原子保存并自动应用" });
+      setActions(current.actions ?? []);
+      setNotice({
+        kind: "success",
+        text: (current.restartRequired ?? []).length
+          ? `配置已保存，来源配置已应用；以下配置需重启：${(current.restartRequired ?? []).join("、")}`
+          : "配置已保存并应用",
+      });
       await load(true);
     } catch (error) {
       setNotice({ kind: "error", text: (error as Error).message });
@@ -306,7 +282,7 @@ function Workspace({ identity }: { identity: Identity | null }) {
                       source.driver !== "upload" &&
                       (admin ||
                         (identity?.syncProjects ?? []).includes(
-                          source.projectId,
+                          source.projectId ?? "",
                         ) ||
                         (identity?.syncSources ?? []).includes(source.id))
                     }

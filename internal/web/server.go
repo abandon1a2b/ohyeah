@@ -3,34 +3,29 @@ package web
 import (
 	"bytes"
 	"context"
-	"crypto/sha256"
 	"database/sql"
 	"embed"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"io"
 	"io/fs"
 	"log/slog"
 	"net/http"
-	"os"
-	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
 
 	"github.com/abandon1a2b/ohyeah/internal/app"
 	"github.com/abandon1a2b/ohyeah/internal/auth"
-	"github.com/abandon1a2b/ohyeah/internal/config"
 	"github.com/abandon1a2b/ohyeah/internal/distribution"
 	"github.com/abandon1a2b/ohyeah/internal/model"
-	"github.com/abandon1a2b/ohyeah/internal/registry"
 	collectsource "github.com/abandon1a2b/ohyeah/internal/source"
 	"github.com/abandon1a2b/ohyeah/internal/store"
 	"github.com/abandon1a2b/ohyeah/internal/syncer"
 	"github.com/abandon1a2b/ohyeah/pkg/collector"
 	"github.com/gofiber/fiber/v2"
 	"github.com/gofiber/fiber/v2/middleware/filesystem"
+	"github.com/gofiber/fiber/v2/middleware/recover"
 )
 
 //go:embed dist
@@ -42,6 +37,10 @@ type configRequest struct {
 }
 
 func New(application *app.App) *fiber.App {
+	configuration := application.Configuration
+	if configuration == nil {
+		configuration = app.NewConfiguration(application.Store, application.Config)
+	}
 	server := fiber.New(fiber.Config{
 		DisableStartupMessage: true,
 		BodyLimit:             32 << 20,
@@ -56,6 +55,7 @@ func New(application *app.App) *fiber.App {
 			return c.Status(code).JSON(fiber.Map{"error": err.Error()})
 		},
 	})
+	server.Use(recover.New())
 	if application.Auth != nil {
 		application.Auth.Register(server)
 	}
@@ -74,21 +74,16 @@ func New(application *app.App) *fiber.App {
 		}
 		return application.Auth.Authenticate(c)
 	})
+
 	api.Get("/status", func(c *fiber.Ctx) error {
-		if auth.Current(c) != nil && !auth.Current(c).Admin {
-			return c.JSON(fiber.Map{"backend": "available", "embeddingEnabled": application.Config.Meilisearch.Embedding.Enabled})
-		}
-		stats, err := application.Store.Stats(c.Context())
+		principal := auth.Current(c)
+		result, err := application.Status(c.Context(), principal == nil || principal.Admin)
 		if err != nil {
 			return err
 		}
-		backend := "available"
-		if err := application.Backend.Healthy(c.Context()); err != nil {
-			backend = err.Error()
-		}
-		doctor, doctorErr := application.Syncer.Doctor(c.Context())
-		return c.JSON(fiber.Map{"backend": backend, "stats": stats, "statePath": application.Config.StatePath, "index": application.Config.Meilisearch.Index, "embeddingEnabled": application.Config.Meilisearch.Embedding.Enabled, "doctor": doctor, "doctorError": errorString(doctorErr)})
+		return c.JSON(result)
 	})
+
 	api.Get("/projects", func(c *fiber.Ctx) error {
 		projects, err := application.Store.ListProjects(c.Context())
 		if err != nil {
@@ -110,9 +105,9 @@ func New(application *app.App) *fiber.App {
 		filtered := make([]model.Source, 0, len(sources))
 		for _, source := range sources {
 			if auth.Can(c, source.ProjectID, "read") {
-				source.Writer, _ = source.Options["__ohyeah_writer"].(string)
 				if p := auth.Current(c); p != nil && !p.Admin {
 					source.Options = nil
+					source.Execution = model.CollectorExecution{}
 					source.Cursor = nil
 				}
 				filtered = append(filtered, source)
@@ -120,15 +115,31 @@ func New(application *app.App) *fiber.App {
 		}
 		return c.JSON(filtered)
 	})
+
 	api.Get("/sync/runs", func(c *fiber.Ctx) error {
-		if auth.Current(c) != nil && !auth.Current(c).Admin {
-			source, err := application.Store.GetSource(c.Context(), c.Query("source"))
-			if err != nil || !auth.Can(c, source.ProjectID, "read") {
+		var ids []string
+		if p := auth.Current(c); p != nil && !p.Admin {
+			ids = []string{}
+			sources, err := application.Store.ListSources(c.Context(), false)
+			if err != nil {
+				return err
+			}
+			for _, source := range sources {
+				if auth.Can(c, source.ProjectID, "read") && (c.Query("source") == "" || source.ID == c.Query("source")) {
+					ids = append(ids, source.ID)
+				}
+			}
+			if c.Query("source") != "" && len(ids) == 0 {
 				return fiber.ErrNotFound
 			}
+		} else if sourceID := c.Query("source"); sourceID != "" {
+			ids = []string{sourceID}
 		}
-		limit, _ := strconv.Atoi(c.Query("limit", "50"))
-		runs, err := application.Store.ListSyncRuns(c.Context(), c.Query("source"), limit)
+		limit, err := strconv.Atoi(c.Query("limit", "50"))
+		if err != nil || limit < 1 || limit > 200 {
+			return fiber.NewError(400, "limit must be between 1 and 200")
+		}
+		runs, err := application.Store.ListSyncRunsForSources(c.Context(), ids, limit)
 		if err != nil {
 			return err
 		}
@@ -137,6 +148,7 @@ func New(application *app.App) *fiber.App {
 		}
 		return c.JSON(runs)
 	})
+
 	api.Post("/sync", func(c *fiber.Ctx) error {
 		var request struct {
 			SourceID string `json:"sourceId"`
@@ -185,7 +197,7 @@ func New(application *app.App) *fiber.App {
 			return source, err
 		}
 		subject, _, _ := auth.Actor(c)
-		writer, _ := source.Options["__ohyeah_writer"].(string)
+		writer := source.Writer
 		if source.Driver != model.DriverUpload || !source.Enabled || source.State != model.SourceStateActive || !auth.CanSource(c, source, "upload") || writer != subject {
 			return source, fiber.ErrForbidden
 		}
@@ -261,7 +273,10 @@ func New(application *app.App) *fiber.App {
 		if query == "" {
 			return fiber.NewError(fiber.StatusBadRequest, "q is required")
 		}
-		limit, _ := strconv.Atoi(c.Query("limit", "20"))
+		limit, err := strconv.Atoi(c.Query("limit", "20"))
+		if err != nil || limit < 1 || limit > 200 {
+			return fiber.NewError(400, "limit must be between 1 and 200")
+		}
 		var kinds []string
 		for _, kind := range strings.Split(c.Query("kind"), ",") {
 			if value := strings.TrimSpace(kind); value != "" {
@@ -303,19 +318,11 @@ func New(application *app.App) *fiber.App {
 		if err := auth.Require(c, "", "admin"); err != nil {
 			return err
 		}
-		raw, err := readConfig(application.Config.Path)
+		snapshot, err := configuration.Read(c.Context())
 		if err != nil {
 			return err
 		}
-		cfg, err := config.Load(application.Config.Path)
-		if err != nil {
-			return err
-		}
-		actions, err := registry.New(application.Store, cfg).Plan(c.Context())
-		if err != nil {
-			return err
-		}
-		return c.JSON(fiber.Map{"path": application.Config.Path, "raw": string(raw), "hash": contentHash(raw), "projects": cfg.Projects, "actions": changedActions(actions)})
+		return c.JSON(snapshot)
 	})
 	api.Post("/config/validate", func(c *fiber.Ctx) error {
 		if err := auth.Require(c, "", "admin"); err != nil {
@@ -325,18 +332,11 @@ func New(application *app.App) *fiber.App {
 		if err := c.BodyParser(&request); err != nil {
 			return fiber.NewError(fiber.StatusBadRequest, err.Error())
 		}
-		cfg, cleanup, err := loadCandidate(application.Config.Path, request.Raw)
-		if cleanup != nil {
-			defer cleanup()
-		}
+		result, err := configuration.Validate(c.Context(), request.Raw)
 		if err != nil {
-			return fiber.NewError(fiber.StatusUnprocessableEntity, err.Error())
+			return configurationError(err)
 		}
-		actions, err := registry.New(application.Store, cfg).Plan(c.Context())
-		if err != nil {
-			return err
-		}
-		return c.JSON(fiber.Map{"valid": true, "actions": changedActions(actions)})
+		return c.JSON(result)
 	})
 	api.Put("/config", func(c *fiber.Ctx) error {
 		if err := auth.Require(c, "", "admin"); err != nil {
@@ -346,37 +346,14 @@ func New(application *app.App) *fiber.App {
 		if err := c.BodyParser(&request); err != nil {
 			return fiber.NewError(fiber.StatusBadRequest, err.Error())
 		}
-		current, err := readConfig(application.Config.Path)
+		result, err := configuration.Save(c.Context(), request.Raw, request.ExpectedHash)
 		if err != nil {
-			return err
-		}
-		if request.ExpectedHash != "" && request.ExpectedHash != contentHash(current) {
-			return fiber.NewError(fiber.StatusConflict, "configuration changed on disk; reload before saving")
-		}
-		cfg, cleanup, err := loadCandidate(application.Config.Path, request.Raw)
-		if cleanup != nil {
-			defer cleanup()
-		}
-		if err != nil {
-			return fiber.NewError(fiber.StatusUnprocessableEntity, err.Error())
-		}
-		actions, err := registry.New(application.Store, cfg).Plan(c.Context())
-		if err != nil {
-			return err
-		}
-		for _, action := range actions {
-			if action.Type == registry.ActionConflict {
-				return c.Status(fiber.StatusConflict).JSON(fiber.Map{"error": "configuration has conflicts", "actions": changedActions(actions)})
+			if errors.Is(err, app.ErrConfigurationConflict) && len(result.Actions) > 0 {
+				return c.Status(409).JSON(fiber.Map{"error": err.Error(), "actions": result.Actions})
 			}
+			return configurationError(err)
 		}
-		if err := writeConfigAtomic(application.Config.Path, []byte(request.Raw)); err != nil {
-			return err
-		}
-		applied, err := registry.New(application.Store, cfg).Apply(c.Context())
-		if err != nil {
-			return err
-		}
-		return c.JSON(fiber.Map{"saved": true, "hash": contentHash([]byte(request.Raw)), "actions": changedActions(applied)})
+		return c.JSON(result)
 	})
 
 	publicURL := ""
@@ -411,85 +388,12 @@ func Run(ctx context.Context, application *app.App, address string) error {
 	}
 }
 
-func loadCandidate(activePath, raw string) (config.Config, func(), error) {
-	if activePath == "" {
-		return config.Config{}, nil, errors.New("serve requires a configuration file for web editing")
+func configurationError(err error) error {
+	if errors.Is(err, app.ErrConfigurationConflict) {
+		return fiber.NewError(409, err.Error())
 	}
-	file, err := os.CreateTemp(filepath.Dir(activePath), ".ohyeah-config-*.yaml")
-	if err != nil {
-		return config.Config{}, nil, err
+	if errors.Is(err, app.ErrInvalidConfiguration) {
+		return fiber.NewError(422, err.Error())
 	}
-	cleanup := func() { _ = os.Remove(file.Name()) }
-	if _, err := file.WriteString(raw); err != nil {
-		_ = file.Close()
-		cleanup()
-		return config.Config{}, nil, err
-	}
-	if err := file.Close(); err != nil {
-		cleanup()
-		return config.Config{}, nil, err
-	}
-	cfg, err := config.Load(file.Name())
-	return cfg, cleanup, err
-}
-
-func readConfig(path string) ([]byte, error) {
-	if path == "" {
-		return nil, errors.New("no configuration file is active")
-	}
-	return os.ReadFile(path)
-}
-
-func writeConfigAtomic(path string, raw []byte) error {
-	if path == "" {
-		return errors.New("no configuration file is active")
-	}
-	info, err := os.Stat(path)
-	if err != nil {
-		return err
-	}
-	file, err := os.CreateTemp(filepath.Dir(path), ".ohyeah-config-write-*.yaml")
-	if err != nil {
-		return err
-	}
-	temporary := file.Name()
-	defer os.Remove(temporary)
-	if err := file.Chmod(info.Mode().Perm()); err != nil {
-		_ = file.Close()
-		return err
-	}
-	if _, err := file.Write(raw); err != nil {
-		_ = file.Close()
-		return err
-	}
-	if err := file.Sync(); err != nil {
-		_ = file.Close()
-		return err
-	}
-	if err := file.Close(); err != nil {
-		return err
-	}
-	return os.Rename(temporary, path)
-}
-
-func changedActions(actions []registry.Action) []registry.Action {
-	result := make([]registry.Action, 0, len(actions))
-	for _, action := range actions {
-		if action.Type != registry.ActionUnchanged {
-			result = append(result, action)
-		}
-	}
-	return result
-}
-
-func contentHash(value []byte) string {
-	hash := sha256.Sum256(value)
-	return hex.EncodeToString(hash[:])
-}
-
-func errorString(err error) string {
-	if err == nil {
-		return ""
-	}
-	return err.Error()
+	return err
 }

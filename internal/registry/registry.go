@@ -269,19 +269,16 @@ func buildDesiredState(cfg config.Config) desiredState {
 			mountHash = identity.Hash(mountHash, configured.Mount.Writer)
 		}
 		options := cloneOptions(configured.Mount.Options)
-		options["command"] = command
-		options["args"] = append([]string(nil), configured.Type.Collector.Args...)
+		execution := model.CollectorExecution{Command: command, Args: append([]string(nil), configured.Type.Collector.Args...)}
 		timeout := configured.Type.Collector.Timeout
 		if timeout <= 0 {
 			timeout = cfg.Sync.CollectorTimeout
 		}
-		options["__ohyeah_timeout"] = timeout.String()
+		execution.Timeout = timeout
 		driver := model.DriverCommand
 		if configured.Type.Collector.Mode == "upload" {
 			driver = model.DriverUpload
-			delete(options, "command")
-			delete(options, "args")
-			options["__ohyeah_writer"] = configured.Mount.Writer
+			execution = model.CollectorExecution{}
 		}
 		mountCanonicalID := typeCanonicalID + "/" + configured.MountID
 		state.mounts = append(state.mounts, model.Source{
@@ -291,7 +288,7 @@ func buildDesiredState(cfg config.Config) desiredState {
 			Enabled: mountEnabled, ManagedBy: model.ManagedByConfig, State: enabledState(mountEnabled),
 			TypeConfigHash: typeHash, MountConfigHash: mountHash,
 			TypeRevision: configured.Type.Collector.Revision, MountRevision: configured.Mount.Revision,
-			Options: options,
+			Options: options, Execution: execution, Writer: configured.Mount.Writer,
 		})
 		state.mountIDs[mountCanonicalID] = struct{}{}
 	}

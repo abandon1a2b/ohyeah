@@ -32,7 +32,7 @@ func TestUploadSurvivesIndexOutageAndServiceRestart(t *testing.T) {
 		t.Fatal(err)
 	}
 	ctx := context.Background()
-	registered := model.Source{ID: "project/remote/node", ProjectID: "project", WorkspaceID: "project", Driver: model.DriverUpload, Path: "/remote", Enabled: true, State: model.SourceStateActive, Options: map[string]any{"__ohyeah_writer": "alice"}}
+	registered := model.Source{ID: "project/remote/node", ProjectID: "project", WorkspaceID: "project", Driver: model.DriverUpload, Path: "/remote", Enabled: true, State: model.SourceStateActive, Writer: "alice"}
 	if err := state.UpsertSource(ctx, registered); err != nil {
 		t.Fatal(err)
 	}

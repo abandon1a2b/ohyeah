@@ -28,7 +28,7 @@ printf '%s\n' '{"type":"complete","mode":"delta","cursor":{"offset":8}}'
 	}
 	registered := model.Source{
 		ID: "custom", WorkspaceID: "test", Driver: model.DriverCommand, Path: root,
-		Options: map[string]any{"command": script}, Cursor: json.RawMessage(`{"offset":7}`), Enabled: true,
+		Execution: model.CollectorExecution{Command: script}, Cursor: json.RawMessage(`{"offset":7}`), Enabled: true,
 	}
 	scanner, err := New(registered)
 	if err != nil {
@@ -56,7 +56,7 @@ func TestCommandCollectorProtocolErrorTerminatesProcess(t *testing.T) {
 	if err := os.WriteFile(script, []byte("#!/bin/sh\necho not-json\nsleep 30\n"), 0o700); err != nil {
 		t.Fatal(err)
 	}
-	registered := model.Source{ID: "custom", WorkspaceID: "test", Driver: model.DriverCommand, Path: root, Options: map[string]any{"command": script}, Enabled: true}
+	registered := model.Source{ID: "custom", WorkspaceID: "test", Driver: model.DriverCommand, Path: root, Execution: model.CollectorExecution{Command: script}, Enabled: true}
 	scanner, err := New(registered)
 	if err != nil {
 		t.Fatal(err)
@@ -76,7 +76,7 @@ func TestCommandCollectorHonorsContextDeadline(t *testing.T) {
 	if err := os.WriteFile(script, []byte("#!/bin/sh\nread request\nsleep 30\n"), 0o700); err != nil {
 		t.Fatal(err)
 	}
-	registered := model.Source{ID: "custom", WorkspaceID: "test", Driver: model.DriverCommand, Path: root, Options: map[string]any{"command": script}, Enabled: true}
+	registered := model.Source{ID: "custom", WorkspaceID: "test", Driver: model.DriverCommand, Path: root, Execution: model.CollectorExecution{Command: script}, Enabled: true}
 	scanner, err := New(registered)
 	if err != nil {
 		t.Fatal(err)
@@ -99,7 +99,7 @@ func TestCommandCollectorRequiresCompleteEnvelope(t *testing.T) {
 	if err := os.WriteFile(script, []byte(content), 0o700); err != nil {
 		t.Fatal(err)
 	}
-	registered := model.Source{ID: "custom", WorkspaceID: "test", Driver: model.DriverCommand, Path: root, Options: map[string]any{"command": script}, Enabled: true}
+	registered := model.Source{ID: "custom", WorkspaceID: "test", Driver: model.DriverCommand, Path: root, Execution: model.CollectorExecution{Command: script}, Enabled: true}
 	scanner, err := New(registered)
 	if err != nil {
 		t.Fatal(err)

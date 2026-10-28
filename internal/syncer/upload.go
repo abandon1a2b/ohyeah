@@ -31,7 +31,9 @@ func (s *Service) Upload(ctx context.Context, registered model.Source, subject, 
 		return collector.UploadReceipt{}, err
 	}
 	sum := sha256.Sum256(data)
+	s.commitMu.RLock()
 	receipt, err := s.store.CommitUpload(ctx, subject, issuer, credential, batch, hex.EncodeToString(sum[:]), result)
+	s.commitMu.RUnlock()
 	if err != nil {
 		return receipt, err
 	}

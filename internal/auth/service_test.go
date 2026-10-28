@@ -52,10 +52,10 @@ type testBackend struct {
 	state *store.Store
 }
 
-func (b testBackend) Healthy(context.Context) error          { return nil }
-func (b testBackend) Ensure(context.Context) error           { return nil }
-func (b testBackend) Upsert(context.Context, [][]byte) error { return nil }
-func (b testBackend) Delete(context.Context, []string) error { return nil }
+func (b testBackend) Healthy(context.Context) error                    { return nil }
+func (b testBackend) Ensure(context.Context) error                     { return nil }
+func (b testBackend) Upsert(context.Context, []model.MemoryUnit) error { return nil }
+func (b testBackend) Delete(context.Context, []string) error           { return nil }
 func (b testBackend) Count(ctx context.Context) (int64, bool, error) {
 	n, err := b.state.MemoryCount(ctx)
 	return n, true, err
@@ -156,7 +156,7 @@ func newFixture(t *testing.T) *fixture {
 		if err := f.state.UpsertProject(ctx, model.Project{ID: project, Workspace: "/fixture", Enabled: true}); err != nil {
 			t.Fatal(err)
 		}
-		if err := f.state.UpsertSource(ctx, model.Source{ID: project + "/docs/main", ProjectID: project, WorkspaceID: "fixture", Driver: model.DriverCommand, Path: "/fixture", Enabled: true, Options: map[string]any{"command": "secret-executable"}}); err != nil {
+		if err := f.state.UpsertSource(ctx, model.Source{ID: project + "/docs/main", ProjectID: project, WorkspaceID: "fixture", Driver: model.DriverCommand, Path: "/fixture", Enabled: true, Execution: model.CollectorExecution{Command: "secret-executable"}}); err != nil {
 			t.Fatal(err)
 		}
 		doc := model.Document{Object: model.SourceObject{ID: project + "-object", SourceID: project + "/docs/main", ExternalID: "a", ContentHash: "hash", ModifiedAt: time.Now(), ParserVersion: 1}, Units: []model.MemoryUnit{{ID: project + "-memory", ProjectID: project, SourceID: project + "/docs/main", WorkspaceID: "fixture", Kind: "document", Content: "private", Status: "observed", OccurredAt: time.Now()}}}
@@ -241,7 +241,7 @@ func TestOIDCAndAuthorization(t *testing.T) {
 	var sources []model.Source
 	json.NewDecoder(response.Body).Decode(&sources)
 	response.Body.Close()
-	if len(sources) != 1 || sources[0].Options != nil {
+	if len(sources) != 1 || sources[0].Options != nil || sources[0].Execution.Command != "" {
 		t.Fatalf("source leak: %#v", sources)
 	}
 	f.request(t, f.browser, "GET", "/api/v1/memories/allowed-memory", "", nil, nil, 200)
@@ -249,7 +249,18 @@ func TestOIDCAndAuthorization(t *testing.T) {
 	f.request(t, f.browser, "GET", "/api/v1/search?q=x", "", nil, nil, 400)
 	f.request(t, f.browser, "GET", "/api/v1/search?q=x&project=secret", "", nil, nil, 403)
 	f.request(t, f.browser, "GET", "/api/v1/search?q=x&project=allowed", "", nil, nil, 200)
-	f.request(t, f.browser, "GET", "/api/v1/sync/runs", "", nil, nil, 404)
+	if _, err := f.state.StartSyncRun(context.Background(), "secret/docs/main"); err != nil {
+		t.Fatal(err)
+	}
+	response, err = f.browser.Get(f.server.URL + "/api/v1/sync/runs")
+	if err != nil {
+		t.Fatal(err)
+	}
+	bulk, _ := io.ReadAll(response.Body)
+	response.Body.Close()
+	if response.StatusCode != 200 || strings.TrimSpace(string(bulk)) != "[]" {
+		t.Fatalf("bulk runs leaked inaccessible source: %d %s", response.StatusCode, bulk)
+	}
 	f.request(t, f.browser, "GET", "/api/v1/sync/runs?source=secret/docs/main", "", nil, nil, 404)
 	response, err = f.browser.Get(f.server.URL + "/api/v1/sync/runs?source=allowed/docs/main")
 	if err != nil {
@@ -395,7 +406,7 @@ func TestCLIPairingRevocationAndMachineTokens(t *testing.T) {
 			t.Fatal(err)
 		}
 		source.Path = root
-		source.Options = map[string]any{"command": shell, "args": []string{script}}
+		source.Execution = model.CollectorExecution{Command: shell, Args: []string{script}}
 		if err := f.state.UpsertSource(context.Background(), source); err != nil {
 			t.Fatal(err)
 		}
@@ -546,7 +557,7 @@ func TestBrowserFixture(t *testing.T) {
 		f.mu.Lock()
 		f.subject = "admin"
 		f.mu.Unlock()
-		source := model.Source{ID: "allowed/remote/node", ProjectID: "allowed", WorkspaceID: "allowed", TypeID: "remote", Driver: model.DriverUpload, Path: "/remote", Enabled: true, State: model.SourceStateActive, Options: map[string]any{"__ohyeah_writer": "admin"}, TypeRevision: 1, MountRevision: 1}
+		source := model.Source{ID: "allowed/remote/node", ProjectID: "allowed", WorkspaceID: "allowed", TypeID: "remote", Driver: model.DriverUpload, Path: "/remote", Enabled: true, State: model.SourceStateActive, Writer: "admin", TypeRevision: 1, MountRevision: 1}
 		if err := f.state.UpsertSource(context.Background(), source); err != nil {
 			t.Fatal(err)
 		}

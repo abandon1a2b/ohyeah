@@ -34,7 +34,7 @@ func TestSchemaInitializationAndReopen(t *testing.T) {
 }
 
 func TestUnsupportedSchemaIsPreserved(t *testing.T) {
-	for _, version := range []int{0, 1, 3, 4, 5, 6, 7, schemaVersion + 1} {
+	for _, version := range []int{0, 1, 3, 4, 5, 6, 7, 8, schemaVersion + 1} {
 		t.Run(fmt.Sprint(version), func(t *testing.T) {
 			path := filepath.Join(t.TempDir(), "state.db")
 			db, err := sql.Open("sqlite", path)
@@ -50,7 +50,7 @@ func TestUnsupportedSchemaIsPreserved(t *testing.T) {
 				s.Close()
 				t.Fatal("unsupported database was accepted")
 			}
-			if !strings.Contains(err.Error(), "use a new state.path") {
+			if !strings.Contains(err.Error(), "use a new state_path") {
 				t.Fatalf("unexpected error: %v", err)
 			}
 			var gotVersion, tables int

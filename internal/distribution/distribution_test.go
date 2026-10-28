@@ -88,7 +88,8 @@ func TestWildcardDownloadAddressAndHostHeader(t *testing.T) {
 	for _, address := range []string{"0.0.0.0:8787", "[::]:8787", ":8787", "[::1]:8787"} {
 		server := fiber.New()
 		Register(server, address)
-		request := httptest.NewRequest("GET", "http://attacker.invalid/downloads", nil)
+		request := httptest.NewRequest("GET", "/downloads", nil)
+		request.Host = "attacker.invalid"
 		response, err := server.Test(request)
 		if err != nil {
 			t.Fatal(err)

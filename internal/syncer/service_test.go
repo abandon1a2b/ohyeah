@@ -2,7 +2,6 @@ package syncer
 
 import (
 	"context"
-	"encoding/json"
 	"os"
 	"path/filepath"
 	"sync"
@@ -36,12 +35,8 @@ func (b *vectorBackend) VectorDocuments(context.Context) (map[string]model.Memor
 	}
 	return result, nil
 }
-func (b *vectorBackend) UpsertVectors(_ context.Context, payloads [][]byte) error {
-	for _, payload := range payloads {
-		var unit model.MemoryUnit
-		if err := json.Unmarshal(payload, &unit); err != nil {
-			return err
-		}
+func (b *vectorBackend) UpsertVectors(_ context.Context, payloads []model.MemoryUnit) error {
+	for _, unit := range payloads {
 		unit.Content = ""
 		b.documents[unit.ID] = unit
 	}
@@ -120,7 +115,7 @@ func (b *recordingBackend) Reset(context.Context) error {
 	b.count = 0
 	return nil
 }
-func (b *recordingBackend) Upsert(_ context.Context, payloads [][]byte) error {
+func (b *recordingBackend) Upsert(_ context.Context, payloads []model.MemoryUnit) error {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	b.count += int64(len(payloads))
@@ -164,8 +159,8 @@ printf '%s\n' '{"type":"complete","mode":"snapshot"}'
 	defer state.Close()
 	ctx := context.Background()
 	for _, source := range []model.Source{
-		{ID: "a-bad", WorkspaceID: "test", Driver: model.DriverCommand, Path: root, Enabled: true, Options: map[string]any{"command": bad}},
-		{ID: "b-good", WorkspaceID: "test", Driver: model.DriverCommand, Path: root, Enabled: true, Options: map[string]any{"command": good}},
+		{ID: "a-bad", WorkspaceID: "test", Driver: model.DriverCommand, Path: root, Enabled: true, Execution: model.CollectorExecution{Command: bad}},
+		{ID: "b-good", WorkspaceID: "test", Driver: model.DriverCommand, Path: root, Enabled: true, Execution: model.CollectorExecution{Command: good}},
 	} {
 		if err := state.UpsertSource(ctx, source); err != nil {
 			t.Fatal(err)

@@ -25,27 +25,41 @@ func Watch(ctx context.Context, path string, debounce time.Duration, reload func
 		return err
 	}
 	var timer *time.Timer
+	var timerC <-chan time.Time
+	defer func() {
+		if timer != nil {
+			timer.Stop()
+		}
+	}()
 	for {
 		select {
 		case <-ctx.Done():
-			if timer != nil {
-				timer.Stop()
-			}
 			return ctx.Err()
-		case err := <-watcher.Errors:
+		case err, ok := <-watcher.Errors:
+			if !ok {
+				return nil
+			}
 			slog.Warn("configuration watcher error", "error", err)
-		case event := <-watcher.Events:
+		case event, ok := <-watcher.Events:
+			if !ok {
+				return nil
+			}
 			if filepath.Clean(event.Name) != filepath.Clean(path) || event.Op&(fsnotify.Write|fsnotify.Create|fsnotify.Rename) == 0 {
 				continue
 			}
 			if timer != nil {
 				timer.Stop()
 			}
-			timer = time.AfterFunc(debounce, func() {
-				if err := reload(ctx); err != nil {
-					slog.Warn("configuration reload rejected; keeping current runtime state", "error", err)
-				}
-			})
+			timer = time.NewTimer(debounce)
+			timerC = timer.C
+		case <-timerC:
+			timerC = nil
+			if err := ctx.Err(); err != nil {
+				return err
+			}
+			if err := reload(ctx); err != nil {
+				slog.Warn("configuration reload rejected; keeping current runtime state", "error", err)
+			}
 		}
 	}
 }

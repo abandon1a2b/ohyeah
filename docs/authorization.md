@@ -4,7 +4,7 @@ Ohyeah supports personal local operation and a central service with multiple use
 
 ## Personal Mode
 
-`auth.mode: local` is the default. It requires `server.address` to bind an explicit loopback IP, such as `127.0.0.1:8787` or `[::1]:8787`. It grants the local operator all permissions. Do not publish this mode through an unauthenticated proxy. The native Go CLI operates directly on local state and is intended for the trusted host operator; it does not apply HTTP user permissions.
+`auth.mode: local` is the default. It requires `server.address` to bind an explicit loopback IP, such as `127.0.0.1:8787` or `[::1]:8787`. It grants the local operator all permissions. Do not publish this mode through an unauthenticated proxy. The native Go CLI operates directly on local state and is intended for the trusted host operator; it does not apply HTTP user permissions. A process lock prevents local CLI state access while serve is running; use the HTTP clients online and stop serve before offline maintenance.
 
 ## Central OIDC Setup
 
@@ -99,7 +99,7 @@ The API exposes `GET /auth/principals`, `GET/PUT/DELETE /auth/principals/<subjec
 | Search | Project in `projects`; OIDC search requires explicit `project` |
 | Get memory | Memory's project in `projects`; unauthorized IDs return 404 |
 | List projects / sources | Filtered by `projects`; collector command options and cursors hidden from nonadmins |
-| List sync runs | Nonadmins must specify an authorized source; global listing is admin-only |
+| List sync runs | Nonadmins receive only runs from readable sources; an explicit unauthorized source returns 404 |
 | Trigger one registered collector | Source's project in `sync_projects` |
 | Trigger all collectors | `admin: true` |
 | Configuration read/write/validate | `admin: true` |
@@ -109,7 +109,7 @@ The API exposes `GET /auth/principals`, `GET/PUT/DELETE /auth/principals/<subjec
 
 The health probe, authentication entry points, static assets and downloadable clients are public. They contain no user or project data. The server stores credential issuance, revocation, rotation, and authenticated mutation records in SQLite, with subject and credential/source IDs, never bearer tokens. Upload commit events are saved atomically with the batch. A mutation first writes a durable pending audit record; if audit storage is unavailable it is not executed. Pending status 0 can indicate a process interruption, so it must not be interpreted as success. Normal completion records the HTTP status, including permission denials by an authenticated account. Logs remain useful for operational diagnostics.
 
-`GET /auth/audit?limit=50&before=N` paginates the current subject's events by descending ID. `all=true` is admin-only and remains restricted to the current issuer. Access Management includes this audit view. `GET /auth/tokens?all=true` likewise supports admin-only credential inventory. Audit retention/backup should be managed with the service's SQLite backup policy; there is no automatic truncation of security history or upload receipts.
+`GET /auth/audit?limit=50&before=N` paginates the current subject's events by descending ID. `all=true` is admin-only and remains restricted to the current issuer. Access Management includes this audit view. `GET /auth/tokens?all=true` likewise supports admin-only credential inventory. Audit retention/backup should be managed with the service's SQLite backup policy; security history is retained forever by default (an administrator may configure audit retention); upload receipts are always retained.
 
 Automated central collection records `collector.commit` events with subject `system` in the same SQLite transaction as its data/outbox changes. User-triggered runs additionally have the authenticated request audit and durable sync-run status. The browser refreshes its identity/permissions periodically; server-side checks remain authoritative on every request.
 

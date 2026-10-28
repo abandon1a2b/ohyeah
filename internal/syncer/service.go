@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
-	"reflect"
 	"sync"
 	"time"
 
@@ -23,6 +22,7 @@ type Service struct {
 	config     config.Config
 	locks      sync.Map
 	dispatchMu sync.Mutex
+	commitMu   sync.RWMutex
 }
 
 type DoctorResult struct {
@@ -118,7 +118,9 @@ func (s *Service) SyncSource(ctx context.Context, registered model.Source) (run 
 	if s.config.Auth.Mode == "oidc" {
 		issuer = s.config.Auth.OIDC.Issuer
 	}
-	changed, deleted, err := s.store.ApplyScanResult(ctx, registered.ID, scanResult, store.AuditEvent{Issuer: issuer, Subject: "system", Action: "collector.commit", ActorKind: "system"})
+	s.commitMu.RLock()
+	changed, deleted, err := s.store.CommitCollection(ctx, registered, scanResult, store.AuditEvent{Issuer: issuer, Subject: "system", Action: "collector.commit", ActorKind: "system"})
+	s.commitMu.RUnlock()
 	if err != nil {
 		return run, err
 	}
@@ -208,9 +210,8 @@ func (s *Service) collect(ctx context.Context, registered model.Source) (model.S
 }
 
 func collectorTimeout(source model.Source, fallback time.Duration) time.Duration {
-	value, _ := source.Options["__ohyeah_timeout"].(string)
-	if parsed, err := time.ParseDuration(value); err == nil && parsed > 0 {
-		return parsed
+	if source.Execution.Timeout > 0 {
+		return source.Execution.Timeout
 	}
 	return fallback
 }
@@ -218,6 +219,10 @@ func collectorTimeout(source model.Source, fallback time.Duration) time.Duration
 func (s *Service) Dispatch(ctx context.Context) error {
 	s.dispatchMu.Lock()
 	defer s.dispatchMu.Unlock()
+	return s.dispatch(ctx)
+}
+
+func (s *Service) dispatch(ctx context.Context) error {
 	if err := s.backend.Ensure(ctx); err != nil {
 		return err
 	}
@@ -229,79 +234,55 @@ func (s *Service) Dispatch(ctx context.Context) error {
 		if len(items) == 0 {
 			return nil
 		}
-		var upserts [][]byte
-		var upsertRows, deleteRows []int64
-		var deletes []string
-		for _, item := range items {
-			switch item.Operation {
-			case "upsert":
-				upserts = append(upserts, item.Payload)
-				upsertRows = append(upsertRows, item.ID)
-			case "delete":
-				deletes = append(deletes, item.UnitID)
-				deleteRows = append(deleteRows, item.ID)
-			default:
-				return fmt.Errorf("unknown outbox operation %q", item.Operation)
-			}
-		}
-		if err := s.backend.Upsert(ctx, upserts); err != nil {
-			_ = s.store.MarkOutboxFailed(ctx, upsertRows, err)
-			return err
-		}
-		if err := s.store.MarkOutboxDelivered(ctx, upsertRows); err != nil {
-			return err
-		}
-		if err := s.backend.Delete(ctx, deletes); err != nil {
-			_ = s.store.MarkOutboxFailed(ctx, deleteRows, err)
-			return err
-		}
-		if err := s.store.MarkOutboxDelivered(ctx, deleteRows); err != nil {
-			return err
-		}
-	}
-}
 
-func (s *Service) Search(ctx context.Context, query model.SearchQuery) ([]model.SearchHit, error) {
-	hits, err := s.backend.Search(ctx, query)
-	if err != nil {
-		return nil, err
-	}
-	ids := make([]string, 0, len(hits))
-	objectIDs := make([]string, 0, len(hits))
-	for _, hit := range hits {
-		ids = append(ids, hit.Unit.ID)
-		objectIDs = append(objectIDs, hit.Unit.ObjectID)
-	}
-	references, err := s.store.ObjectReferences(ctx, objectIDs)
-	if err != nil {
-		return nil, err
-	}
-	corrections, err := s.store.CorrectingUnits(ctx, ids)
-	if err != nil {
-		return nil, err
-	}
-	result := make([]model.SearchHit, 0, query.Limit)
-	seenObjects := make(map[string]struct{})
-	for _, hit := range hits {
-		hit.Reference = references[hit.Unit.ObjectID]
-		if correcting := corrections[hit.Unit.ID]; len(correcting) > 0 {
-			hit.Superseded = true
-			hit.CorrectedBy = correcting
-			continue
+		// Deliver contiguous operation groups so delete -> recreate retains order.
+		// Ack only after the backend task completes; replay is idempotent.
+		for start := 0; start < len(items); {
+			end := start + 1
+			for end < len(items) && items[end].Operation == items[start].Operation {
+				end++
+			}
+			group := items[start:end]
+			rows := make([]int64, 0, len(group))
+			for _, item := range group {
+				rows = append(rows, item.ID)
+			}
+			var deliveryErr error
+			switch group[0].Operation {
+			case "upsert":
+				units := make([]model.MemoryUnit, 0, len(group))
+				for _, item := range group {
+					var unit model.MemoryUnit
+					if err := json.Unmarshal(item.Payload, &unit); err != nil {
+						return fmt.Errorf("outbox %d: %w", item.ID, err)
+					}
+					units = append(units, unit)
+				}
+				deliveryErr = s.backend.Upsert(ctx, units)
+			case "delete":
+				ids := make([]string, 0, len(group))
+				for _, item := range group {
+					ids = append(ids, item.UnitID)
+				}
+				deliveryErr = s.backend.Delete(ctx, ids)
+			default:
+				return fmt.Errorf("unknown outbox operation %q", group[0].Operation)
+			}
+			if deliveryErr != nil {
+				_ = s.store.MarkOutboxFailed(ctx, rows, deliveryErr)
+				return deliveryErr
+			}
+			if err := s.store.MarkOutboxDelivered(ctx, rows); err != nil {
+				return err
+			}
+			start = end
 		}
-		if _, duplicate := seenObjects[hit.Unit.ObjectID]; duplicate {
-			continue
-		}
-		seenObjects[hit.Unit.ObjectID] = struct{}{}
-		result = append(result, hit)
-		if query.Limit > 0 && len(result) >= query.Limit {
-			break
-		}
 	}
-	return result, nil
 }
 
 func (s *Service) RebuildIndex(ctx context.Context) (int64, error) {
+	s.commitMu.Lock()
+	defer s.commitMu.Unlock()
 	s.dispatchMu.Lock()
 	defer s.dispatchMu.Unlock()
 	if err := s.backend.Reset(ctx); err != nil {
@@ -311,7 +292,7 @@ func (s *Service) RebuildIndex(ctx context.Context) (int64, error) {
 	var afterID string
 	var indexed int64
 	for {
-		payloads, nextID, err := s.store.MemoryPayloadBatch(ctx, afterID, batchSize)
+		payloads, nextID, err := s.store.MemoryBatch(ctx, afterID, batchSize)
 		if err != nil {
 			return indexed, err
 		}
@@ -324,6 +305,9 @@ func (s *Service) RebuildIndex(ctx context.Context) (int64, error) {
 		indexed += int64(len(payloads))
 		afterID = nextID
 	}
+	if err := s.dispatch(ctx); err != nil {
+		return indexed, err
+	}
 	result, err := s.Doctor(ctx)
 	if err != nil {
 		return indexed, err
@@ -332,97 +316,6 @@ func (s *Service) RebuildIndex(ctx context.Context) (int64, error) {
 		return indexed, fmt.Errorf("index rebuild count mismatch: sqlite=%d meilisearch=%d", result.SQLiteCount, result.MeilisearchCount)
 	}
 	return indexed, nil
-}
-
-type VectorSyncResult struct {
-	Updated   int64 `json:"updated"`
-	Unchanged int64 `json:"unchanged"`
-	Deleted   int64 `json:"deleted"`
-}
-
-func (s *Service) SyncVectorIndex(ctx context.Context, rebuild, dryRun bool) (VectorSyncResult, error) {
-	backend, ok := s.backend.(interface {
-		ResetVectors(context.Context) error
-		EnsureVectors(context.Context) error
-		VectorDocuments(context.Context) (map[string]model.MemoryUnit, error)
-		UpsertVectors(context.Context, [][]byte) error
-		DeleteVectors(context.Context, []string) error
-	})
-	if !ok {
-		return VectorSyncResult{}, errors.New("backend does not support vectors")
-	}
-	if rebuild && dryRun {
-		return VectorSyncResult{}, errors.New("vector rebuild cannot be a dry run")
-	}
-	if rebuild {
-		if err := backend.ResetVectors(ctx); err != nil {
-			return VectorSyncResult{}, err
-		}
-	} else if !dryRun {
-		if err := backend.EnsureVectors(ctx); err != nil {
-			return VectorSyncResult{}, err
-		}
-	}
-	existing, err := backend.VectorDocuments(ctx)
-	if err != nil {
-		return VectorSyncResult{}, err
-	}
-	var afterID string
-	var result VectorSyncResult
-	for {
-		payloads, nextID, err := s.store.MemoryPayloadBatch(ctx, afterID, 500)
-		if err != nil {
-			return result, err
-		}
-		if len(payloads) == 0 {
-			break
-		}
-		changed := make([][]byte, 0, len(payloads))
-		for _, payload := range payloads {
-			var unit model.MemoryUnit
-			if err := json.Unmarshal(payload, &unit); err != nil {
-				return result, err
-			}
-			previous, found := existing[unit.ID]
-			delete(existing, unit.ID)
-			unit.Content = ""
-			if found && reflect.DeepEqual(previous, unit) {
-				result.Unchanged++
-				continue
-			}
-			changed = append(changed, payload)
-		}
-		if !dryRun {
-			for offset := 0; offset < len(changed); offset += 64 {
-				end := min(offset+64, len(changed))
-				if err := backend.UpsertVectors(ctx, changed[offset:end]); err != nil {
-					return result, err
-				}
-			}
-		}
-		result.Updated += int64(len(changed))
-		afterID = nextID
-	}
-	ids := make([]string, 0, 500)
-	for id := range existing {
-		ids = append(ids, id)
-		if len(ids) == 500 {
-			if !dryRun {
-				if err := backend.DeleteVectors(ctx, ids); err != nil {
-					return result, err
-				}
-			}
-			result.Deleted += int64(len(ids))
-			ids = ids[:0]
-		}
-	}
-	if !dryRun {
-		if err := backend.DeleteVectors(ctx, ids); err != nil {
-			return result, err
-		}
-	}
-	result.Deleted += int64(len(ids))
-	return result, nil
 }
 
 func (s *Service) Doctor(ctx context.Context) (DoctorResult, error) {

@@ -1,0 +1,1289 @@
+{
+  "$defs": {
+    "AuditEvent": {
+      "properties": {
+        "action": {
+          "type": "string"
+        },
+        "actorKind": {
+          "type": "string"
+        },
+        "credentialId": {
+          "type": "string"
+        },
+        "details": {},
+        "id": {
+          "type": "integer"
+        },
+        "issuer": {
+          "type": "string"
+        },
+        "occurredAt": {
+          "type": "integer"
+        },
+        "resource": {
+          "type": "string"
+        },
+        "status": {
+          "type": "integer"
+        },
+        "subject": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "occurredAt",
+        "issuer",
+        "subject",
+        "credentialId",
+        "action",
+        "resource",
+        "status",
+        "details",
+        "actorKind"
+      ],
+      "type": "object"
+    },
+    "CollectorConfig": {
+      "properties": {
+        "Args": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "Command": {
+          "type": "string"
+        },
+        "Mode": {
+          "type": "string"
+        },
+        "Revision": {
+          "type": "integer"
+        },
+        "Timeout": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "Mode",
+        "Command",
+        "Args",
+        "Revision",
+        "Timeout"
+      ],
+      "type": "object"
+    },
+    "CollectorExecution": {
+      "properties": {
+        "args": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "command": {
+          "type": "string"
+        },
+        "timeout": {
+          "type": "integer"
+        }
+      },
+      "required": [],
+      "type": "object"
+    },
+    "ConfigData": {
+      "properties": {
+        "actions": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/$defs/RegistryAction"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "hash": {
+          "type": "string"
+        },
+        "path": {
+          "type": "string"
+        },
+        "projects": {
+          "anyOf": [
+            {
+              "additionalProperties": {
+                "$ref": "#/$defs/ProjectConfig"
+              },
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "raw": {
+          "type": "string"
+        },
+        "restartRequired": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "saved": {
+          "type": "boolean"
+        },
+        "valid": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "path",
+        "raw",
+        "hash",
+        "projects",
+        "actions",
+        "restartRequired",
+        "valid",
+        "saved"
+      ],
+      "type": "object"
+    },
+    "Credential": {
+      "properties": {
+        "createdAt": {
+          "type": "integer"
+        },
+        "expiresAt": {
+          "type": "integer"
+        },
+        "id": {
+          "type": "string"
+        },
+        "issuer": {
+          "type": "string"
+        },
+        "kind": {
+          "type": "string"
+        },
+        "lastUsedAt": {
+          "type": "integer"
+        },
+        "name": {
+          "type": "string"
+        },
+        "subject": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "subject",
+        "issuer",
+        "kind",
+        "name",
+        "expiresAt",
+        "createdAt",
+        "lastUsedAt"
+      ],
+      "type": "object"
+    },
+    "DataType": {
+      "properties": {
+        "args": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "command": {
+          "type": "string"
+        },
+        "configHash": {
+          "type": "string"
+        },
+        "createdAt": {
+          "format": "date-time",
+          "type": "string"
+        },
+        "enabled": {
+          "type": "boolean"
+        },
+        "id": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "projectId": {
+          "type": "string"
+        },
+        "revision": {
+          "type": "integer"
+        },
+        "state": {
+          "type": "string"
+        },
+        "updatedAt": {
+          "format": "date-time",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "projectId",
+        "name",
+        "command",
+        "revision",
+        "configHash",
+        "enabled",
+        "state",
+        "createdAt",
+        "updatedAt"
+      ],
+      "type": "object"
+    },
+    "DataTypeConfig": {
+      "properties": {
+        "Collector": {
+          "$ref": "#/$defs/CollectorConfig"
+        },
+        "Enabled": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "Mounts": {
+          "anyOf": [
+            {
+              "additionalProperties": {
+                "$ref": "#/$defs/MountConfig"
+              },
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "Enabled",
+        "Collector",
+        "Mounts"
+      ],
+      "type": "object"
+    },
+    "Doctor": {
+      "properties": {
+        "consistent": {
+          "type": "boolean"
+        },
+        "indexExists": {
+          "type": "boolean"
+        },
+        "meilisearchCount": {
+          "type": "integer"
+        },
+        "sqliteCount": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "sqliteCount",
+        "meilisearchCount",
+        "indexExists",
+        "consistent"
+      ],
+      "type": "object"
+    },
+    "Document": {
+      "properties": {
+        "externalId": {
+          "type": "string"
+        },
+        "modifiedAt": {
+          "format": "date-time",
+          "type": "string"
+        },
+        "reference": {
+          "anyOf": [
+            {
+              "additionalProperties": {
+                "type": "string"
+              },
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "relations": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/$defs/Relation"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "sourceType": {
+          "type": "string"
+        },
+        "units": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/$defs/Unit"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "externalId",
+        "units"
+      ],
+      "type": "object"
+    },
+    "Envelope": {
+      "properties": {
+        "cursor": {},
+        "document": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Document"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "externalId": {
+          "type": "string"
+        },
+        "level": {
+          "type": "string"
+        },
+        "message": {
+          "type": "string"
+        },
+        "mode": {
+          "type": "string"
+        },
+        "type": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "type"
+      ],
+      "type": "object"
+    },
+    "MemoryRecord": {
+      "properties": {
+        "reference": {
+          "anyOf": [
+            {
+              "additionalProperties": {
+                "type": "string"
+              },
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "unit": {
+          "$ref": "#/$defs/MemoryUnit"
+        }
+      },
+      "required": [
+        "unit"
+      ],
+      "type": "object"
+    },
+    "MemoryUnit": {
+      "properties": {
+        "content": {
+          "type": "string"
+        },
+        "contentHash": {
+          "type": "string"
+        },
+        "entities": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "heading": {
+          "type": "string"
+        },
+        "id": {
+          "type": "string"
+        },
+        "kind": {
+          "type": "string"
+        },
+        "metadata": {
+          "anyOf": [
+            {
+              "additionalProperties": {
+                "type": "string"
+              },
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "mountId": {
+          "type": "string"
+        },
+        "objectId": {
+          "type": "string"
+        },
+        "occurredAt": {
+          "format": "date-time",
+          "type": "string"
+        },
+        "path": {
+          "type": "string"
+        },
+        "projectId": {
+          "type": "string"
+        },
+        "repos": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "requirementIds": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "sourceId": {
+          "type": "string"
+        },
+        "sourceType": {
+          "type": "string"
+        },
+        "status": {
+          "type": "string"
+        },
+        "threadId": {
+          "type": "string"
+        },
+        "title": {
+          "type": "string"
+        },
+        "turnId": {
+          "type": "string"
+        },
+        "typeId": {
+          "type": "string"
+        },
+        "workspaceId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "objectId",
+        "workspaceId",
+        "sourceId",
+        "sourceType",
+        "kind",
+        "title",
+        "content",
+        "occurredAt",
+        "contentHash",
+        "status"
+      ],
+      "type": "object"
+    },
+    "MountConfig": {
+      "properties": {
+        "Enabled": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "Options": {
+          "anyOf": [
+            {
+              "additionalProperties": {},
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "Revision": {
+          "type": "integer"
+        },
+        "Root": {
+          "type": "string"
+        },
+        "Writer": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "Writer",
+        "Enabled",
+        "Root",
+        "Revision",
+        "Options"
+      ],
+      "type": "object"
+    },
+    "Principal": {
+      "properties": {
+        "admin": {
+          "type": "boolean"
+        },
+        "disabled": {
+          "type": "boolean"
+        },
+        "name": {
+          "type": "string"
+        },
+        "projects": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "subject": {
+          "type": "string"
+        },
+        "syncProjects": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "syncSources": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "uploadSources": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "subject",
+        "name",
+        "admin",
+        "disabled",
+        "projects",
+        "syncProjects",
+        "syncSources",
+        "uploadSources"
+      ],
+      "type": "object"
+    },
+    "PrincipalPolicy": {
+      "properties": {
+        "configured": {
+          "type": "boolean"
+        },
+        "principal": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Principal"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "subject": {
+          "type": "string"
+        },
+        "version": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "subject",
+        "version",
+        "principal",
+        "configured"
+      ],
+      "type": "object"
+    },
+    "Project": {
+      "properties": {
+        "createdAt": {
+          "format": "date-time",
+          "type": "string"
+        },
+        "enabled": {
+          "type": "boolean"
+        },
+        "id": {
+          "type": "string"
+        },
+        "state": {
+          "type": "string"
+        },
+        "updatedAt": {
+          "format": "date-time",
+          "type": "string"
+        },
+        "workspace": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "workspace",
+        "enabled",
+        "state",
+        "createdAt",
+        "updatedAt"
+      ],
+      "type": "object"
+    },
+    "ProjectConfig": {
+      "properties": {
+        "Enabled": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "Types": {
+          "anyOf": [
+            {
+              "additionalProperties": {
+                "$ref": "#/$defs/DataTypeConfig"
+              },
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "Workspace": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "Enabled",
+        "Workspace",
+        "Types"
+      ],
+      "type": "object"
+    },
+    "RegistryAction": {
+      "properties": {
+        "desiredMount": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Source"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "desiredProject": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Project"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "desiredType": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/DataType"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "entity": {
+          "type": "string"
+        },
+        "id": {
+          "type": "string"
+        },
+        "reason": {
+          "type": "string"
+        },
+        "resetCursor": {
+          "type": "boolean"
+        },
+        "type": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "entity",
+        "type",
+        "id",
+        "reason",
+        "resetCursor"
+      ],
+      "type": "object"
+    },
+    "Relation": {
+      "properties": {
+        "confidence": {
+          "type": "number"
+        },
+        "fromExternalId": {
+          "type": "string"
+        },
+        "fromKey": {
+          "type": "string"
+        },
+        "toExternalId": {
+          "type": "string"
+        },
+        "toKey": {
+          "type": "string"
+        },
+        "type": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "fromKey",
+        "toKey",
+        "type"
+      ],
+      "type": "object"
+    },
+    "SearchHit": {
+      "properties": {
+        "correctedBy": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "reference": {
+          "anyOf": [
+            {
+              "additionalProperties": {
+                "type": "string"
+              },
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "score": {
+          "type": "number"
+        },
+        "superseded": {
+          "type": "boolean"
+        },
+        "unit": {
+          "$ref": "#/$defs/MemoryUnit"
+        }
+      },
+      "required": [
+        "unit",
+        "superseded"
+      ],
+      "type": "object"
+    },
+    "Source": {
+      "properties": {
+        "createdAt": {
+          "format": "date-time",
+          "type": "string"
+        },
+        "cursor": {},
+        "driver": {
+          "type": "string"
+        },
+        "enabled": {
+          "type": "boolean"
+        },
+        "execution": {
+          "$ref": "#/$defs/CollectorExecution"
+        },
+        "id": {
+          "type": "string"
+        },
+        "managedBy": {
+          "type": "string"
+        },
+        "mountConfigHash": {
+          "type": "string"
+        },
+        "mountName": {
+          "type": "string"
+        },
+        "mountRevision": {
+          "type": "integer"
+        },
+        "options": {
+          "anyOf": [
+            {
+              "additionalProperties": {},
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "path": {
+          "type": "string"
+        },
+        "projectId": {
+          "type": "string"
+        },
+        "projectWorkspace": {
+          "type": "string"
+        },
+        "state": {
+          "type": "string"
+        },
+        "typeConfigHash": {
+          "type": "string"
+        },
+        "typeId": {
+          "type": "string"
+        },
+        "typeRevision": {
+          "type": "integer"
+        },
+        "updatedAt": {
+          "format": "date-time",
+          "type": "string"
+        },
+        "workspaceId": {
+          "type": "string"
+        },
+        "writer": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "workspaceId",
+        "driver",
+        "path",
+        "enabled",
+        "managedBy",
+        "state",
+        "createdAt",
+        "updatedAt"
+      ],
+      "type": "object"
+    },
+    "Status": {
+      "properties": {
+        "backend": {
+          "type": "string"
+        },
+        "doctor": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Doctor"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "doctorError": {
+          "type": "string"
+        },
+        "embeddingEnabled": {
+          "type": "boolean"
+        },
+        "index": {
+          "type": "string"
+        },
+        "statePath": {
+          "type": "string"
+        },
+        "stats": {
+          "anyOf": [
+            {
+              "additionalProperties": {
+                "type": "integer"
+              },
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "backend",
+        "embeddingEnabled"
+      ],
+      "type": "object"
+    },
+    "SyncRun": {
+      "properties": {
+        "changed": {
+          "type": "integer"
+        },
+        "deleted": {
+          "type": "integer"
+        },
+        "error": {
+          "type": "string"
+        },
+        "finishedAt": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "id": {
+          "type": "integer"
+        },
+        "scanned": {
+          "type": "integer"
+        },
+        "sourceId": {
+          "type": "string"
+        },
+        "startedAt": {
+          "format": "date-time",
+          "type": "string"
+        },
+        "status": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "sourceId",
+        "status",
+        "scanned",
+        "changed",
+        "deleted",
+        "startedAt"
+      ],
+      "type": "object"
+    },
+    "Unit": {
+      "properties": {
+        "content": {
+          "type": "string"
+        },
+        "entities": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "heading": {
+          "type": "string"
+        },
+        "key": {
+          "type": "string"
+        },
+        "kind": {
+          "type": "string"
+        },
+        "metadata": {
+          "anyOf": [
+            {
+              "additionalProperties": {
+                "type": "string"
+              },
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "occurredAt": {
+          "format": "date-time",
+          "type": "string"
+        },
+        "path": {
+          "type": "string"
+        },
+        "repos": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "requirementIds": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "status": {
+          "type": "string"
+        },
+        "threadId": {
+          "type": "string"
+        },
+        "title": {
+          "type": "string"
+        },
+        "turnId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "key",
+        "kind",
+        "title",
+        "content"
+      ],
+      "type": "object"
+    },
+    "UploadBatch": {
+      "properties": {
+        "batchId": {
+          "type": "string"
+        },
+        "envelopes": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/$defs/Envelope"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "expectedVersion": {
+          "type": "integer"
+        },
+        "protocolVersion": {
+          "type": "integer"
+        },
+        "scopeRevision": {
+          "type": "string"
+        },
+        "sourceId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "protocolVersion",
+        "sourceId",
+        "batchId",
+        "expectedVersion",
+        "scopeRevision",
+        "envelopes"
+      ],
+      "type": "object"
+    },
+    "UploadReceipt": {
+      "properties": {
+        "batchId": {
+          "type": "string"
+        },
+        "changed": {
+          "type": "integer"
+        },
+        "deleted": {
+          "type": "integer"
+        },
+        "indexPending": {
+          "type": "boolean"
+        },
+        "replayed": {
+          "type": "boolean"
+        },
+        "runId": {
+          "type": "integer"
+        },
+        "sourceId": {
+          "type": "string"
+        },
+        "version": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "sourceId",
+        "batchId",
+        "version",
+        "runId",
+        "changed",
+        "deleted",
+        "replayed",
+        "indexPending"
+      ],
+      "type": "object"
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema"
+}

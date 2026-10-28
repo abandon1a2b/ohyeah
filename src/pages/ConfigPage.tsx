@@ -64,7 +64,7 @@ export function ConfigPage({
         <div>
           <h2 className="text-lg font-semibold">配置管理</h2>
           <p className="mt-1 text-sm text-muted-foreground">
-            保存后自动校验并应用
+            来源配置保存后自动应用，服务设置可能需要重启
           </p>
         </div>
         <div className="flex gap-2">
@@ -94,6 +94,11 @@ export function ConfigPage({
           </Button>
         </div>
       </div>
+      {!!data?.restartRequired?.length && (
+        <p role="status" className="text-sm text-muted-foreground">
+          已保存的配置尚需重启才能完全生效：{data.restartRequired?.join("、")}
+        </p>
+      )}
       <Tabs value={mode} onValueChange={setMode}>
         <div className="flex flex-wrap items-center justify-between gap-3 border-b pb-3">
           <TabsList>
@@ -133,7 +138,7 @@ export function ConfigPage({
       <section className="flex flex-col gap-3">
         <h3 className="text-sm font-semibold">待应用变更</h3>
         {actions.length === 0 ? (
-          <Empty title="运行配置已与文件一致" />
+          <Empty title="来源配置已与文件一致" />
         ) : (
           <div className="divide-y border-y">
             {actions.map((action, index) => (

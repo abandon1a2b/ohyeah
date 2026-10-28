@@ -7,14 +7,14 @@ import (
 	"errors"
 	"time"
 
-	"github.com/abandon1a2b/ohyeah/internal/config"
+	"github.com/abandon1a2b/ohyeah/internal/model"
 )
 
 type PrincipalPolicy struct {
-	Subject    string                  `json:"subject"`
-	Version    int64                   `json:"version"`
-	Principal  *config.PrincipalConfig `json:"principal"`
-	Configured bool                    `json:"configured"`
+	Subject    string           `json:"subject"`
+	Version    int64            `json:"version"`
+	Principal  *model.Principal `json:"principal"`
+	Configured bool             `json:"configured"`
 }
 
 var ErrPolicyConflict = errors.New("permissions changed concurrently; reload before saving")
@@ -51,7 +51,7 @@ func (s *Store) ListPrincipalPolicies(ctx context.Context, issuer string) ([]Pri
 	return result, rows.Err()
 }
 
-func (s *Store) SavePrincipalPolicy(ctx context.Context, issuer, subject string, expected int64, p *config.PrincipalConfig) (PrincipalPolicy, error) {
+func (s *Store) SavePrincipalPolicy(ctx context.Context, issuer, subject string, expected int64, p *model.Principal) (PrincipalPolicy, error) {
 	var result PrincipalPolicy
 	err := s.withTx(ctx, func(tx *sql.Tx) error {
 		if _, err := tx.ExecContext(ctx, `INSERT OR IGNORE INTO auth_principals(issuer,subject,policy_json,version) VALUES(?,?,'null',0)`, issuer, subject); err != nil {

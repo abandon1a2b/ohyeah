@@ -18,6 +18,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/abandon1a2b/ohyeah/internal/access"
 	"github.com/abandon1a2b/ohyeah/internal/config"
 	"github.com/abandon1a2b/ohyeah/internal/model"
 	"github.com/abandon1a2b/ohyeah/internal/store"
@@ -138,29 +139,12 @@ func (s *Service) issue(ctx context.Context, subject, kind, name string, ttl tim
 }
 
 func Current(c *fiber.Ctx) *Identity { p, _ := c.Locals("identity").(*Identity); return p }
-func contains(values []string, value string) bool {
-	for _, v := range values {
-		if v == value {
-			return true
-		}
-	}
-	return false
-}
 func Can(c *fiber.Ctx, project, action string) bool {
 	p := Current(c)
 	if p == nil {
 		return c.Locals("localAuth") == true
 	}
-	if p.Admin {
-		return true
-	}
-	if action == "read" {
-		return contains(p.Projects, project)
-	}
-	if action == "sync" {
-		return contains(p.SyncProjects, project)
-	}
-	return false
+	return access.Can(p.PrincipalConfig, project, action)
 }
 func Require(c *fiber.Ctx, project, action string) error {
 	if !Can(c, project, action) {
@@ -170,20 +154,11 @@ func Require(c *fiber.Ctx, project, action string) error {
 }
 
 func CanSource(c *fiber.Ctx, source model.Source, action string) bool {
-	if Can(c, source.ProjectID, action) {
-		return true
-	}
 	p := Current(c)
 	if p == nil {
-		return false
+		return c.Locals("localAuth") == true
 	}
-	if action == "sync" {
-		return contains(p.SyncSources, source.ID)
-	}
-	if action == "upload" {
-		return contains(p.UploadSources, source.ID)
-	}
-	return false
+	return access.CanSource(p.PrincipalConfig, source, action)
 }
 
 func Actor(c *fiber.Ctx) (subject, issuer, credential string) {

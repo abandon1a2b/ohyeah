@@ -35,27 +35,34 @@ const (
 	RelationDerivedFrom = "derived_from"
 )
 
+type CollectorExecution struct {
+	Command string        `json:"command,omitempty"`
+	Args    []string      `json:"args,omitempty"`
+	Timeout time.Duration `json:"timeout,omitempty"`
+}
+
 type Source struct {
-	Writer           string          `json:"writer,omitempty"`
-	ID               string          `json:"id"`
-	ProjectID        string          `json:"projectId,omitempty"`
-	ProjectWorkspace string          `json:"projectWorkspace,omitempty"`
-	TypeID           string          `json:"typeId,omitempty"`
-	MountName        string          `json:"mountName,omitempty"`
-	WorkspaceID      string          `json:"workspaceId"`
-	Driver           string          `json:"driver"`
-	Path             string          `json:"path"`
-	Enabled          bool            `json:"enabled"`
-	ManagedBy        string          `json:"managedBy"`
-	State            string          `json:"state"`
-	TypeConfigHash   string          `json:"typeConfigHash,omitempty"`
-	MountConfigHash  string          `json:"mountConfigHash,omitempty"`
-	TypeRevision     int             `json:"typeRevision,omitempty"`
-	MountRevision    int             `json:"mountRevision,omitempty"`
-	Options          map[string]any  `json:"options,omitempty"`
-	Cursor           json.RawMessage `json:"cursor,omitempty"`
-	CreatedAt        time.Time       `json:"createdAt"`
-	UpdatedAt        time.Time       `json:"updatedAt"`
+	Execution        CollectorExecution `json:"execution,omitzero"`
+	Writer           string             `json:"writer,omitempty"`
+	ID               string             `json:"id"`
+	ProjectID        string             `json:"projectId,omitempty"`
+	ProjectWorkspace string             `json:"projectWorkspace,omitempty"`
+	TypeID           string             `json:"typeId,omitempty"`
+	MountName        string             `json:"mountName,omitempty"`
+	WorkspaceID      string             `json:"workspaceId"`
+	Driver           string             `json:"driver"`
+	Path             string             `json:"path"`
+	Enabled          bool               `json:"enabled"`
+	ManagedBy        string             `json:"managedBy"`
+	State            string             `json:"state"`
+	TypeConfigHash   string             `json:"typeConfigHash,omitempty"`
+	MountConfigHash  string             `json:"mountConfigHash,omitempty"`
+	TypeRevision     int                `json:"typeRevision,omitempty"`
+	MountRevision    int                `json:"mountRevision,omitempty"`
+	Options          map[string]any     `json:"options,omitempty"`
+	Cursor           json.RawMessage    `json:"cursor,omitempty"`
+	CreatedAt        time.Time          `json:"createdAt"`
+	UpdatedAt        time.Time          `json:"updatedAt"`
 }
 
 type Project struct {

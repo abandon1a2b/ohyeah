@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"reflect"
 	"testing"
 )
 
@@ -132,5 +133,33 @@ func TestMeilisearchEnvironmentOverrides(t *testing.T) {
 	}
 	if cfg.Meilisearch.Mode != "managed" || cfg.Meilisearch.URL != "http://127.0.0.1:7799" {
 		t.Fatalf("overrides: %#v", cfg.Meilisearch)
+	}
+}
+
+func TestParseMatchesLoadWithoutWritingFiles(t *testing.T) {
+	root := t.TempDir()
+	path := filepath.Join(root, "config.yaml")
+	raw := "meilisearch:\n  url: http://127.0.0.1:7701\nprojects: {}\n"
+	t.Setenv("OHYEAH_SERVER_ADDRESS", "127.0.0.1:9876")
+	parsed, err := Parse(path, raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	entries, err := os.ReadDir(root)
+	if err != nil || len(entries) != 0 {
+		t.Fatalf("Parse wrote files: %v %v", entries, err)
+	}
+	if err := os.WriteFile(path, []byte(raw), 0600); err != nil {
+		t.Fatal(err)
+	}
+	loaded, err := Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(parsed, loaded) {
+		t.Fatalf("Parse differs from Load: %#v / %#v", parsed, loaded)
+	}
+	if parsed.Server.Address != "127.0.0.1:9876" || parsed.Meilisearch.Mode != "external" {
+		t.Fatal("environment overrides or legacy endpoint mode lost")
 	}
 }

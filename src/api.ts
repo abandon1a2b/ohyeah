@@ -1,39 +1,26 @@
+import type { UploadReceipt } from "./generated/contracts";
 import type {
   ConfigData,
   Doctor,
   MemoryRecord,
   Project,
-  RegistryAction,
   SearchHit,
   Source,
   Status,
   SyncRun,
 } from "./types";
-import { csrfHeaders } from "./auth";
+import { createClient } from "./http";
 
-async function request<T>(path: string, init?: RequestInit): Promise<T> {
-  const response = await fetch(`/api/v1${path}`, {
-    ...init,
-    headers: {
-      "Content-Type": "application/json",
-      ...csrfHeaders(),
-      ...init?.headers,
-    },
-  });
-  if (response.status === 401) window.location.assign("/auth/login");
-  const body = await response.json().catch(() => ({}));
-  if (!response.ok)
-    throw new Error(body.error || `请求失败 (${response.status})`);
-  return body as T;
-}
+const request = createClient("/api/v1");
 
 export const api = {
-  status: () => request<Status>("/status"),
-  projects: () => request<Project[]>("/projects"),
-  sources: () => request<Source[]>("/sources"),
-  runs: (limit = 200, source?: string) =>
+  status: (signal?: AbortSignal) => request<Status>("/status", { signal }),
+  projects: (signal?: AbortSignal) => request<Project[]>("/projects", { signal }),
+  sources: (signal?: AbortSignal) => request<Source[]>("/sources", { signal }),
+  runs: (limit = 200, source?: string, signal?: AbortSignal) =>
     request<SyncRun[]>(
       `/sync/runs?limit=${limit}${source ? `&source=${encodeURIComponent(source)}` : ""}`,
+      { signal },
     ),
   sync: (sourceId?: string) =>
     request<SyncRun | SyncRun[]>("/sync", {
@@ -41,12 +28,7 @@ export const api = {
       body: JSON.stringify({ sourceId }),
     }),
   upload: (batch: unknown) =>
-    request<{
-      batchId: string;
-      version: number;
-      replayed: boolean;
-      indexPending: boolean;
-    }>("/uploads", { method: "POST", body: JSON.stringify(batch) }),
+    request<UploadReceipt>("/uploads", { method: "POST", body: JSON.stringify(batch) }),
   search: (params: URLSearchParams) =>
     request<SearchHit[]>(`/search?${params}`),
   memory: (id: string) =>
@@ -58,12 +40,12 @@ export const api = {
     }),
   config: () => request<ConfigData>("/config"),
   validateConfig: (raw: string) =>
-    request<{ valid: boolean; actions: RegistryAction[] }>("/config/validate", {
+    request<ConfigData>("/config/validate", {
       method: "POST",
       body: JSON.stringify({ raw }),
     }),
   saveConfig: (raw: string, expectedHash: string) =>
-    request<{ saved: boolean; hash: string; actions: RegistryAction[] }>(
+    request<ConfigData>(
       "/config",
       { method: "PUT", body: JSON.stringify({ raw, expectedHash }) },
     ),

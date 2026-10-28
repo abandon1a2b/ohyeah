@@ -28,14 +28,11 @@ type Command struct {
 }
 
 func NewCommand(source model.Source) (Command, error) {
-	executable, _ := source.Options["command"].(string)
+	executable := source.Execution.Command
 	if strings.TrimSpace(executable) == "" {
-		return Command{}, errors.New("command collector requires options.command")
+		return Command{}, errors.New("command collector requires execution.command")
 	}
-	args, err := stringSlice(source.Options["args"])
-	if err != nil {
-		return Command{}, err
-	}
+	args := append([]string(nil), source.Execution.Args...)
 	return Command{executable: executable, args: args}, nil
 }
 
@@ -293,27 +290,6 @@ func publicOptions(options map[string]any) map[string]any {
 		}
 	}
 	return result
-}
-
-func stringSlice(value any) ([]string, error) {
-	switch values := value.(type) {
-	case nil:
-		return nil, nil
-	case []string:
-		return values, nil
-	case []any:
-		result := make([]string, 0, len(values))
-		for _, value := range values {
-			stringValue, ok := value.(string)
-			if !ok {
-				return nil, errors.New("command collector options.args must contain only strings")
-			}
-			result = append(result, stringValue)
-		}
-		return result, nil
-	default:
-		return nil, errors.New("command collector options.args must be an array")
-	}
 }
 
 func collectedRef(externalID, key string) string { return externalID + "\x00" + key }

@@ -3,6 +3,7 @@ package config
 import (
 	"errors"
 	"fmt"
+	"io"
 	"net"
 	"net/url"
 	"os"
@@ -17,7 +18,15 @@ import (
 	"github.com/spf13/viper"
 )
 
+type MaintenanceConfig struct {
+	Interval        time.Duration `mapstructure:"interval"`
+	OutboxRetention time.Duration `mapstructure:"outbox_retention"`
+	SyncRetention   time.Duration `mapstructure:"sync_retention"`
+	AuditRetention  time.Duration `mapstructure:"audit_retention"`
+}
+
 type Config struct {
+	Maintenance      MaintenanceConfig        `mapstructure:"maintenance"`
 	Path             string                   `mapstructure:"-"`
 	StatePath        string                   `mapstructure:"state_path"`
 	LogLevel         string                   `mapstructure:"log_level"`
@@ -113,6 +122,16 @@ type ConfiguredMount struct {
 var configIDPattern = regexp.MustCompile(`^[a-z0-9][a-z0-9._-]*$`)
 
 func Load(path string) (Config, error) {
+	return load(path, nil)
+}
+
+// Parse validates YAML using the same defaults and environment overrides as Load,
+// without creating temporary files or changing the active configuration.
+func Parse(path, raw string) (Config, error) {
+	return load(path, strings.NewReader(raw))
+}
+
+func load(path string, input io.Reader) (Config, error) {
 	v := viper.New()
 	v.SetEnvPrefix("OHYEAH")
 	v.SetEnvKeyReplacer(strings.NewReplacer(".", "_"))
@@ -125,6 +144,10 @@ func Load(path string) (Config, error) {
 
 	v.SetDefault("state_path", filepath.Join(dataDir, "state.db"))
 	v.SetDefault("log_level", "info")
+	v.SetDefault("maintenance.interval", "24h")
+	v.SetDefault("maintenance.outbox_retention", "168h")
+	v.SetDefault("maintenance.sync_retention", "720h")
+	v.SetDefault("maintenance.audit_retention", "0s")
 	v.SetDefault("meilisearch.url", "http://127.0.0.1:7700")
 	v.SetDefault("meilisearch.mode", "managed")
 	v.SetDefault("meilisearch.directory", filepath.Join(dataDir, "meilisearch"))
@@ -160,7 +183,12 @@ func Load(path string) (Config, error) {
 		v.AddConfigPath(filepath.Join(configDir, "ohyeah"))
 	}
 
-	if err := v.ReadInConfig(); err != nil {
+	if input != nil {
+		v.SetConfigType("yaml")
+		if err := v.ReadConfig(input); err != nil {
+			return Config{}, err
+		}
+	} else if err := v.ReadInConfig(); err != nil {
 		var notFound viper.ConfigFileNotFoundError
 		if path != "" || !errors.As(err, &notFound) {
 			return Config{}, err
@@ -195,6 +223,11 @@ func Load(path string) (Config, error) {
 	}
 	if cfg.Path != "" {
 		cfg.Path, _ = filepath.Abs(cfg.Path)
+		if resolved, err := filepath.EvalSymlinks(cfg.Path); err == nil {
+			cfg.Path = resolved
+		} else if parent, err := filepath.EvalSymlinks(filepath.Dir(cfg.Path)); err == nil {
+			cfg.Path = filepath.Join(parent, filepath.Base(cfg.Path))
+		}
 	}
 	if strings.TrimSpace(cfg.Server.Address) == "" {
 		return Config{}, errors.New("server.address is required")
@@ -218,6 +251,9 @@ func Load(path string) (Config, error) {
 	}
 	if cfg.Sync.CollectorTimeout <= 0 {
 		return Config{}, errors.New("sync.collector_timeout must be positive")
+	}
+	if cfg.Maintenance.Interval <= 0 || cfg.Maintenance.OutboxRetention < 0 || cfg.Maintenance.SyncRetention < 0 || cfg.Maintenance.AuditRetention < 0 {
+		return Config{}, errors.New("maintenance interval must be positive and retention durations must not be negative (zero retains forever)")
 	}
 	if err := cfg.ValidateProjects(); err != nil {
 		return Config{}, err

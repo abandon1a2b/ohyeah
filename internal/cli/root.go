@@ -1,12 +1,10 @@
 package cli
 
 import (
-	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
-	"log/slog"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -17,16 +15,14 @@ import (
 
 	"github.com/abandon1a2b/ohyeah/internal/app"
 	"github.com/abandon1a2b/ohyeah/internal/config"
-	"github.com/abandon1a2b/ohyeah/internal/managed"
 	"github.com/abandon1a2b/ohyeah/internal/model"
 	"github.com/abandon1a2b/ohyeah/internal/registry"
+	"github.com/abandon1a2b/ohyeah/internal/runtime"
 	"github.com/abandon1a2b/ohyeah/internal/source"
-	"github.com/abandon1a2b/ohyeah/internal/syncer"
-	"github.com/abandon1a2b/ohyeah/internal/web"
 	"github.com/spf13/cobra"
 )
 
-const version = "0.1.0-dev"
+var version = "0.1.0-dev"
 
 type options struct {
 	configPath string
@@ -58,6 +54,7 @@ func newRootCommand(opts *options) *cobra.Command {
 		newSearchCommand(opts),
 		newGetCommand(opts),
 		newStatusCommand(opts),
+		newStateCommand(opts),
 		newServeCommand(opts),
 		&cobra.Command{Use: "version", Short: "Print version", RunE: func(cmd *cobra.Command, args []string) error {
 			return writeOutput(opts, map[string]string{"version": version}, version)
@@ -163,7 +160,7 @@ func newConfigCommand(opts *options) *cobra.Command {
 				return err
 			}
 			defer application.Close()
-			actions, err := registry.New(application.Store, application.Config).Apply(cmd.Context())
+			actions, err := application.Configuration.Apply(cmd.Context(), application.Config)
 			if err != nil {
 				if opts.jsonOutput {
 					_ = writeOutput(opts, actions, "")
@@ -280,12 +277,10 @@ func newSourceCommand(opts *options) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			options["command"] = collectorCommand
-			options["args"] = collectorArgs
 			registered := model.Source{
 				ID: id, TypeID: "external", MountName: id, WorkspaceID: workspace, Driver: model.DriverCommand, Path: absolute,
 				Enabled: true, ManagedBy: model.ManagedByCLI, State: model.SourceStateActive,
-				Options: options, CreatedAt: now, UpdatedAt: now,
+				Options: options, Execution: model.CollectorExecution{Command: collectorCommand, Args: collectorArgs}, CreatedAt: now, UpdatedAt: now,
 			}
 			if _, err := source.New(registered); err != nil {
 				return err
@@ -539,72 +534,7 @@ func newServeCommand(opts *options) *cobra.Command {
 			defer application.Close()
 			ctx, cancel := signal.NotifyContext(cmd.Context(), os.Interrupt, syscall.SIGTERM)
 			defer cancel()
-			var engine *managed.Process
-			if application.Config.Meilisearch.Mode == "managed" {
-				engine, err = managed.Start(ctx, application.Config.Meilisearch)
-				if err != nil {
-					return err
-				}
-				defer engine.Close()
-				if err := application.Ensure(ctx); err != nil {
-					return err
-				}
-				doctor, err := application.Syncer.Doctor(ctx)
-				if err != nil {
-					return err
-				}
-				if !doctor.Consistent {
-					if _, err := application.Syncer.RebuildIndex(ctx); err != nil {
-						return err
-					}
-				}
-			}
-			if _, err := registry.New(application.Store, application.Config).Apply(ctx); err != nil {
-				return err
-			}
-			sources, err := application.Store.ListSources(ctx, true)
-			if err != nil {
-				return err
-			}
-			workers := 4
-			if engine != nil {
-				workers++
-			}
-			errCh := make(chan error, workers)
-			if engine != nil {
-				go func() { errCh <- engine.Wait(ctx) }()
-			}
-			go func() { errCh <- application.Syncer.RunPeriodic(ctx) }()
-			go func() {
-				errCh <- syncer.WatchDynamic(ctx, func(listCtx context.Context) ([]model.Source, error) {
-					return application.Store.ListSources(listCtx, true)
-				}, application.Config.Sync.Debounce, func(syncCtx context.Context) error {
-					_, err := application.Syncer.SyncAll(syncCtx)
-					return err
-				})
-			}()
-			go func() {
-				errCh <- config.Watch(ctx, application.Config.Path, application.Config.Sync.Debounce, func(reloadCtx context.Context) error {
-					updated, err := config.Load(application.Config.Path)
-					if err != nil {
-						return err
-					}
-					_, err = registry.New(application.Store, updated).Apply(reloadCtx)
-					return err
-				})
-			}()
-			go func() { errCh <- web.Run(ctx, application, application.Config.Server.Address) }()
-			slog.Info("ohyeah service started", "sources", len(sources), "web", "http://"+application.Config.Server.Address)
-			err = <-errCh
-			interrupted := ctx.Err() != nil
-			cancel()
-			for i := 1; i < workers; i++ {
-				<-errCh
-			}
-			if !interrupted && err != nil && err != context.Canceled {
-				return err
-			}
-			return nil
+			return runtime.Run(ctx, application)
 		},
 	}
 }

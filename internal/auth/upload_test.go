@@ -17,7 +17,7 @@ import (
 func TestUploadAuthorizationAndDownloadedClients(t *testing.T) {
 	f := newFixture(t)
 	ctx := context.Background()
-	registered := model.Source{ID: "allowed/remote/node", ProjectID: "allowed", WorkspaceID: "allowed", TypeID: "remote", Driver: model.DriverUpload, Path: "/remote", Enabled: true, State: model.SourceStateActive, Options: map[string]any{"__ohyeah_writer": "robot"}, TypeRevision: 1, MountRevision: 1}
+	registered := model.Source{ID: "allowed/remote/node", ProjectID: "allowed", WorkspaceID: "allowed", TypeID: "remote", Driver: model.DriverUpload, Path: "/remote", Enabled: true, State: model.SourceStateActive, Writer: "robot", TypeRevision: 1, MountRevision: 1}
 	if err := f.state.UpsertSource(ctx, registered); err != nil {
 		t.Fatal(err)
 	}

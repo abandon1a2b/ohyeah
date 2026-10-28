@@ -1,0 +1,42 @@
+import { test, expect } from "@playwright/test";
+
+test("search provenance, reject invalid limits, save config and report restart", async ({ page, request }, testInfo) => {
+  const errors: string[] = [];
+  page.on("pageerror", error => errors.push(error.message));
+  page.on("console", message => { if (message.type() === "error") errors.push(message.text()); });
+  await page.goto("/");
+  await expect(page).toHaveTitle(/ohyeah/i);
+  await expect(page.getByRole("button", { name: "记忆搜索", exact: true })).toBeVisible();
+  await expect.poll(async () => {
+    const response = await request.get("/api/v1/search?q=configuration&project=fixture");
+    return response.ok() ? (await response.json()).length : 0;
+  }, { timeout: 30000 }).toBeGreaterThan(0);
+  await page.getByRole("button", { name: "记忆搜索", exact: true }).click();
+  await page.getByRole("textbox", { name: "搜索工作记忆" }).fill("configuration");
+  await page.getByRole("button", { name: "搜索", exact: true }).click();
+  await expect(page.getByText("Regression evidence", { exact: true })).toBeVisible();
+  await page.getByText("Regression evidence", { exact: true }).click();
+  await expect(page.getByRole("dialog")).toContainText("https://example.com/evidence");
+  await page.keyboard.press("Escape");
+  const invalid = await request.get("/api/v1/search?q=test&limit=-1");
+  expect(invalid.status()).toBe(400);
+  expect((await request.get("/api/v1/health")).ok()).toBeTruthy();
+  await page.getByRole("button", { name: "配置管理", exact: true }).click();
+  await page.getByRole("tab", { name: "YAML" }).click();
+  const editor = page.locator("textarea");
+  await expect(editor).toHaveValue(/state_path:/);
+  const raw = await editor.inputValue();
+  await editor.fill(`${raw}\nmaintenance:\n  interval: 25h\n`);
+  await page.getByRole("button", { name: "校验", exact: true }).click();
+  await expect(page.getByText(/配置校验通过.*maintenance/)).toBeVisible();
+  await page.getByRole("button", { name: "保存并应用", exact: true }).click();
+  await expect(page.getByRole("status")).toContainText("maintenance");
+  await page.reload();
+  await page.getByRole("button", { name: "配置管理", exact: true }).click();
+  await expect(page.getByRole("status")).toContainText("maintenance");
+  await page.screenshot({ path: testInfo.outputPath("configuration-desktop.png"), fullPage: true });
+  await page.setViewportSize({ width: 390, height: 844 });
+  await expect(page.getByRole("status")).toContainText("maintenance");
+  await page.screenshot({ path: testInfo.outputPath("configuration-mobile.png"), fullPage: true });
+  expect(errors).toEqual([]);
+});

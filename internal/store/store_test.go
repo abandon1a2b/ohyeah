@@ -102,7 +102,7 @@ func TestSourceCursorRoundTrip(t *testing.T) {
 	ctx := context.Background()
 	registered := model.Source{
 		ID: "custom", WorkspaceID: "test", Driver: model.DriverCommand, Path: t.TempDir(), Enabled: true,
-		Options: map[string]any{"command": "collector", "args": []string{"--mode", "fast"}},
+		Execution: model.CollectorExecution{Command: "collector", Args: []string{"--mode", "fast"}},
 	}
 	if err := state.UpsertSource(ctx, registered); err != nil {
 		t.Fatal(err)
@@ -117,7 +117,7 @@ func TestSourceCursorRoundTrip(t *testing.T) {
 	if string(loaded.Cursor) != `{"offset":9}` {
 		t.Fatalf("cursor = %s", loaded.Cursor)
 	}
-	if loaded.Options["command"] != "collector" {
+	if loaded.Execution.Command != "collector" {
 		t.Fatalf("options = %#v", loaded.Options)
 	}
 }

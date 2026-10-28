@@ -1,55 +1,9 @@
-import { csrfHeaders } from "./auth";
+import { createClient } from "./http";
 
-export type Credential = {
-  id: string;
-  subject: string;
-  name: string;
-  kind: string;
-  expiresAt: number;
-  createdAt: number;
-  lastUsedAt: number;
-};
-export type Principal = {
-  subject: string;
-  name: string;
-  admin: boolean;
-  disabled: boolean;
-  projects: string[] | null;
-  syncProjects: string[] | null;
-  syncSources: string[] | null;
-  uploadSources: string[] | null;
-};
-export type PrincipalPolicy = {
-  subject: string;
-  version: number;
-  principal: Principal | null;
-  configured: boolean;
-};
-export type AuditEvent = {
-  id: number;
-  occurredAt: number;
-  subject: string;
-  credentialId: string;
-  action: string;
-  resource: string;
-  status: number;
-};
+import type { Credential, Principal, PrincipalPolicy, AuditEvent } from "./generated/contracts";
+export type { Credential, Principal, PrincipalPolicy, AuditEvent } from "./generated/contracts";
 
-async function request<T>(path: string, init?: RequestInit): Promise<T> {
-  const response = await fetch(`/auth${path}`, {
-    ...init,
-    headers: {
-      "Content-Type": "application/json",
-      ...csrfHeaders(),
-      ...init?.headers,
-    },
-  });
-  const body = await response.json().catch(() => ({}));
-  if (response.status === 401) window.location.assign("/auth/login");
-  if (!response.ok)
-    throw new Error(body.error || `请求失败 (${response.status})`);
-  return body as T;
-}
+const request = createClient("/auth");
 
 export const securityAPI = {
   tokens: (all: boolean) => request<Credential[]>(`/tokens?all=${all}`),
