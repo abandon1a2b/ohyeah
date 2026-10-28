@@ -17,7 +17,7 @@ jobs:
         with:
           node-version-file: .node-version
           cache: npm
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         with:
           python-version: '3.12'
       - run: npm install --global npm@11.16.0
