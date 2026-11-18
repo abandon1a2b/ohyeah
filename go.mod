@@ -12,7 +12,7 @@ require (
 	github.com/meilisearch/meilisearch-go v0.36.3
 	github.com/spf13/cobra v1.10.2
 	github.com/spf13/viper v1.21.0
-	golang.org/x/oauth2 v0.37.0
+	golang.org/x/oauth2 v0.38.0
 	modernc.org/sqlite v1.46.1
 )
 
